@@ -3,14 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack --hostname 0.0.0.0",
+    "dev-secure": "next dev --turbopack --hostname 0.0.0.0",
+    "proxy": "node https-proxy.js",
+    "dev-proxy": "concurrently \"next dev --turbopack --hostname 0.0.0.0 --port 3001\" \"node https-proxy.js\"",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
+    "form-data": "^4.0.2",
     "next": "15.3.2",
+    "node-fetch": "^2.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -20,8 +25,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.1.2",
     "eslint": "^9",
     "eslint-config-next": "15.3.2",
+    "https-localhost": "^4.7.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
