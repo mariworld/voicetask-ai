@@ -16,8 +16,42 @@ async def transcribe_audio_test(
     """
     Test endpoint: Transcribe audio to text without authentication
     """
+    # Validate file content type
+    content_type = audio.content_type or ""
+    print(f"Received audio file: {audio.filename}, content_type: {content_type}, size: {audio.size} bytes")
+    
+    # List of allowed MIME types
+    allowed_mime_types = [
+        "audio/mp3", "audio/mpeg", "audio/wav", "audio/wave", 
+        "audio/x-wav", "audio/m4a", "audio/mp4", "audio/x-m4a", 
+        "audio/aac", "audio/webm", "audio/ogg", "audio/x-aiff",
+        "audio/flac", "audio/x-caf", "application/octet-stream"
+    ]
+    
+    # Check if the content-type is allowed
+    if content_type and content_type not in allowed_mime_types:
+        print(f"Warning: Content-type is not in the allowed list: {content_type}")
+        if not content_type.startswith("audio/"):
+            print(f"Warning: Content-type does not appear to be audio: {content_type}")
+    
     # Read audio content
-    audio_content = await audio.read()
+    try:
+        audio_content = await audio.read()
+        file_size = len(audio_content)
+        print(f"Successfully read {file_size} bytes from uploaded file")
+        
+        if file_size < 100:
+            print(f"Warning: Audio file is very small ({file_size} bytes), possibly empty or corrupted")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Audio file appears to be empty or corrupted"
+            )
+    except Exception as e:
+        print(f"Error reading audio file: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to read audio file: {str(e)}"
+        )
     
     # Transcribe audio
     transcription = await voice_service.transcribe_audio(audio_content)
@@ -25,18 +59,28 @@ async def transcribe_audio_test(
     if not transcription:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to transcribe audio"
+            detail="Failed to transcribe audio. The file may be corrupted or in an unsupported format."
         )
     
     return transcription
 
 @router.post("/extract-tasks-test", response_model=List[TaskCreate])
 async def extract_tasks_test(
-    transcription: str
+    transcription_data: dict
 ):
     """
     Test endpoint: Extract tasks from transcribed text without authentication
     """
+    # Extract the transcription string from the request payload
+    if not transcription_data or "transcription" not in transcription_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transcription text is required in the request body"
+        )
+    
+    transcription = transcription_data["transcription"]
+    print(f"Received transcription for task extraction: {transcription}")
+    
     tasks = await voice_service.extract_tasks(transcription)
     
     if not tasks:

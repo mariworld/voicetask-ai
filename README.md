@@ -1,279 +1,154 @@
-# Voice-to-Task AI API
+# VoiceTask AI Monorepo
 
-Backend API for the Voice-to-Task AI application, which transcribes voice notes and extracts structured tasks using AI.
+A comprehensive suite for voice-controlled task management, including a React Native Expo mobile app, a Next.js web interface (if applicable), and a Python FastAPI backend.
 
-## Features
+## Table of Contents
 
-- Record voice notes from any device
-- Automatic transcription using OpenAI's Whisper API
-- AI-powered task extraction from natural language
-- Task management with status tracking
-- Cross-device compatibility (desktop and mobile)
+- [Project Overview](#project-overview)
+- [Monorepo Structure](#monorepo-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Setup Instructions](#setup-instructions)
+- [Running the Development Environment](#running-the-development-environment)
+  - [Starting the Mobile App & API (Recommended)](#starting-the-mobile-app--api-recommended)
+  - [Starting the Web App (Next.js)](#starting-the-web-app-nextjs)
+  - [Manual Startup of Individual Components](#manual-startup-of-individual-components)
+- [Environment Variables](#environment-variables)
+- [Development Notes](#development-notes)
+- [License](#license)
 
-## Setup
+## Project Overview
 
-### Basic Setup
+This monorepo houses the VoiceTask AI ecosystem, which primarily includes:
+- **Mobile App (`./voicetask/`)**: A React Native (Expo) application for voice recording, task creation, and management on mobile devices.
+- **Backend API (`./api/`)**: A Python FastAPI server that supports the mobile app by handling voice transcription, task extraction, and data persistence.
+- **Web App (`./src/`)**: (Optional) A Next.js application. Its current functionality and integration should be documented here if it's an active part of the project.
 
-1. Clone the repository:
+## Monorepo Structure
+
+The project is organized as a monorepo with the following key directories:
+
+- **`/api/`**: Python FastAPI backend for the mobile app.
+  - `api/.venv/`: Python virtual environment for the API.
+- **`/voicetask/`**: React Native (Expo) mobile application.
+- **`/src/`**: (Optional) Next.js frontend web application.
+- **`/public/`**: Static assets for the Next.js web application (if used).
+- **`/scripts/`**: Utility and helper scripts for the monorepo (e.g., `start-dev-environment.sh`).
+- **`package.json` (root)**: Manages Node.js dependencies and scripts for the monorepo (potentially for Next.js, Expo, and shared development tools).
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js**: v18+ recommended.
+- **npm** or **Yarn** or **PNPM**: For managing Node.js packages.
+- **Python**: v3.9+ (for the FastAPI backend).
+- **pip**: Python package manager.
+- **Expo CLI** (globally or as a project dependency): `npm install -g expo-cli` (if not already managed by the project's dependencies).
+- **Git**: For version control.
+
+### Setup Instructions
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/voicetask-ai.git # Replace with your repo URL
+    cd voicetask-ai
+    ```
+
+2.  **Install Root & Web App Dependencies (if applicable):**
+    (This step handles dependencies for the root of the monorepo and the Next.js app if present)
+    ```bash
+    npm install # or yarn install / pnpm install
+    ```
+
+3.  **Install Mobile App (Expo) Dependencies:**
+    ```bash
+    cd voicetask
+    npm install # or yarn install / pnpm install
+    cd ..
+    ```
+
+4.  **Setup Backend API & Virtual Environment:**
+    ```bash
+    cd api
+    python -m venv .venv      # Create virtual environment
+    source .venv/bin/activate # On Windows: .venv\Scripts\activate
+    pip install -r requirements.txt
+    # Deactivate if you wish (the start script will try to activate it): deactivate
+    cd ..
+    ```
+
+## Running the Development Environment
+
+### Starting the Mobile App & API (Recommended)
+
+The `start-dev-environment.sh` script (located in the root or `/scripts/`) is the primary way to launch the development environment for the **mobile app** and its supporting **backend API**.
+
+**Usage (from the monorepo root):**
 ```bash
-git clone https://github.com/your-username/voicetask-ai.git
-cd voicetask-ai
+./start-dev-environment.sh
+# or if moved to scripts/:
+# ./scripts/start-dev-environment.sh
 ```
+This script will:
+1. Terminate any conflicting previously running server processes.
+2. Activate the Python virtual environment for the API (if `api/.venv` exists).
+3. Start the FastAPI backend server (typically on `http://localhost:8001`).
+4. Start the Expo development server for the mobile app (typically on `http://localhost:8081`), opening it in a new terminal window on macOS.
 
-2. Install frontend dependencies:
+### Starting the Web App (Next.js)
+
+If you have a Next.js web application in `./src/` and want to run it:
+From the monorepo root:
 ```bash
-npm install
+npm run dev:web # Assuming a script like "dev:web": "cd src && npm run dev" or "next dev" in root package.json
+# or
+# cd src
+# npm run dev
+# cd ..
 ```
-
-3. Create a virtual environment for the API:
-```bash
-cd api
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cd ..
-```
-
-4. Create a `.env` file in the `api` directory with the following content:
-```
-# OpenAI API Configuration
-OPENAI_API_KEY=your_openai_api_key
-
-# JWT Secret Key for token signing
-# For production, generate a secure random key
-SECRET_KEY=your_secret_key
-```
-
-### Running the Application
-
-For the best experience, use our startup menu script:
-
-```bash
-./start.sh
-```
-
-This provides options for:
-1. **Standard HTTP mode** - For local development (desktop only)
-2. **HTTPS with mkcert** - For secure development with mobile device testing
-3. **HTTPS with ngrok** - For external access and testing
-4. **Connection testing** - To verify HTTPS is working correctly
-
-## Mobile Device Testing
-
-To use voice recording features on mobile devices, the application **must** be served over HTTPS. 
-
-### HTTPS Setup with mkcert (Recommended)
-
-The easiest way to set up HTTPS for local development is using mkcert:
-
-1. Install mkcert:
-   - macOS: `brew install mkcert`
-   - Ubuntu/Debian: `apt install mkcert`
-   - Windows: Download from [https://github.com/FiloSottile/mkcert](https://github.com/FiloSottile/mkcert)
-
-2. Run our setup script:
-```bash
-./start-https.sh
-```
-
-This will:
-- Install local CA (Certificate Authority) and generate certificates
-- Configure both frontend and backend to use HTTPS
-- Make the app accessible on your local network for mobile testing
-
-3. On your mobile device:
-   - Connect to the same WiFi network as your development computer
-   - Visit `https://YOUR_COMPUTER_IP:3000` (the IP will be shown in the console)
-   - Accept the certificate warning (one-time step)
-   - Use voice recording features securely
-
-### Troubleshooting
-
-If you encounter issues with HTTPS or voice recording:
-
-1. Run the test script:
-```bash
-node test-https-connection.js
-```
-
-2. Check for these common issues:
-   - Ensure both frontend and API are running with HTTPS
-   - Verify your mobile device and computer are on the same network
-   - Check that your browser allows microphone access 
-   - Accept the certificate in your mobile browser
-   - Ensure the API URL in the frontend uses HTTPS (check browser console)
-
-## API Endpoints
-
-### Authentication
-
-#### 1. Register User
-
-**Endpoint:** `POST /api/v1/auth/register`
-
-**Description:** Register a new user with email and password.
-
-**Request:**
-```json
-{
-  "email": "user@example.com",
-  "password": "securepassword",
-  "full_name": "John Doe"
-}
-```
-
-#### 2. Login
-
-**Endpoint:** `POST /api/v1/auth/login`
-
-**Description:** Authenticate a user and get access token.
-
-**Request:**
-```json
-{
-  "email": "user@example.com",
-  "password": "securepassword"
-}
-```
-
-**Response:**
-```json
-{
-  "access_token": "your_jwt_token",
-  "token_type": "bearer",
-  "user": {
-    "id": "user_id",
-    "email": "user@example.com",
-    "full_name": "John Doe"
-  }
-}
-```
-
-### Tasks
-
-#### 1. Get Tasks
-
-**Endpoint:** `GET /api/v1/tasks`
-
-**Description:** Get all tasks for the authenticated user.
-
-**Query Parameters:**
-- `status` (optional): Filter tasks by status ("To Do", "In Progress", "Done")
-
-**Response:**
-```json
-[
-  {
-    "id": "task_id",
-    "user_id": "user_id",
-    "title": "Call John about the project",
-    "status": "To Do",
-    "created_at": "2023-05-14T12:00:00Z",
-    "updated_at": "2023-05-14T12:00:00Z"
-  }
-]
-```
-
-#### 2. Create Task
-
-**Endpoint:** `POST /api/v1/tasks`
-
-**Description:** Create a new task for the authenticated user.
-
-**Request:**
-```json
-{
-  "title": "Submit the report",
-  "status": "To Do"
-}
-```
-
-#### 3. Update Task
-
-**Endpoint:** `PUT /api/v1/tasks/{task_id}`
-
-**Description:** Update an existing task.
-
-**Request:**
-```json
-{
-  "title": "Submit the quarterly report",
-  "status": "In Progress"
-}
-```
-
-#### 4. Delete Task
-
-**Endpoint:** `DELETE /api/v1/tasks/{task_id}`
-
-**Description:** Delete a task.
-
-### Voice Processing
-
-#### 1. Transcribe Audio
-
-**Endpoint:** `POST /api/v1/voice/transcribe`
-
-**Description:** Transcribes an audio file using OpenAI's Whisper API.
-
-**Request:**
-- Form data with an audio file (supported formats: mp3, mp4, mpeg, mpga, m4a, wav, webm)
-
-**Response:**
-```
-"Your transcribed text here"
-```
-
-#### 2. Extract Tasks
-
-**Endpoint:** `POST /api/v1/voice/extract-tasks`
-
-**Description:** Extracts structured tasks from a transcript using OpenAI GPT.
-
-**Request:**
-```json
-{
-  "transcription": "I need to call John about the project tomorrow and submit the report by Friday."
-}
-```
-
-**Response:**
-```json
-[
-  {
-    "title": "Call John about the project",
-    "status": "To Do"
-  },
-  {
-    "title": "Submit the report",
-    "status": "To Do"
-  }
-]
-```
-
-#### 3. Process Voice
-
-**Endpoint:** `POST /api/v1/voice/process`
-
-**Description:** Process voice recording into tasks (transcribe, extract, save).
-
-**Request:**
-- Form data with an audio file (supported formats: mp3, mp4, mpeg, mpga, m4a, wav, webm)
-
-**Response:**
-```json
-[
-  {
-    "id": "task_id",
-    "user_id": "user_id",
-    "title": "Call John about the project",
-    "status": "To Do",
-    "created_at": "2023-05-14T12:00:00Z",
-    "updated_at": "2023-05-14T12:00:00Z"
-  }
-]
-```
-
-## Database Schema
-
-The SQLite database contains a `
+*(Please update this section based on how your Next.js app is actually started).*
+
+### Manual Startup of Individual Components
+
+**1. Backend API (`./api/`):**
+   From the monorepo root:
+   ```bash
+   cd api
+   source .venv/bin/activate # On Windows: .venv\Scripts\activate
+   python start_api.py       # This script should handle 'uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload'
+   cd ..
+   ```
+
+**2. Mobile App - Expo (`./voicetask/`):**
+   From the monorepo root:
+   ```bash
+   cd voicetask
+   npx expo start
+   cd ..
+   ```
+
+## Environment Variables
+
+-   **Backend API (`./api/.env`):**
+    Create a `.env` file in the `./api/` directory with necessary variables:
+    ```env
+    OPENAI_API_KEY=your_openai_api_key
+    SUPABASE_URL=your_supabase_url # If using Supabase
+    SUPABASE_KEY=your_supabase_key   # If using Supabase
+    SECRET_KEY=a_strong_random_secret_key_for_security
+    # Any other backend-specific variables
+    ```
+
+-   **Frontend (Mobile/Web):**
+    For the mobile app (`./voicetask/`) to connect to your local API, ensure the API base URL in `voicetask/services/api.ts` (or equivalent configuration file) is correctly set (e.g., `http://localhost:8001` for simulators/emulators, or your computer's local network IP for testing on a physical device).
+    Next.js environment variables are typically managed via `.env.local` in the project root or the `./src/` directory.
+
+## Development Notes
+
+- Ensure your computer and any physical mobile devices used for testing are on the same network to allow the mobile app to connect to the local API server.
+- The `start-dev-environment.sh` script is tailored for macOS/Linux. For Windows, you might need to adapt parts of it or run components manually.
+
+## License
+
+[MIT License](LICENSE) (Assuming you have a LICENSE file. If not, you can remove this line or add one.)
