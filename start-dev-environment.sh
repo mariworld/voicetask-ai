@@ -55,18 +55,39 @@ fi
 
 echo -e "${GREEN}[2/5] All previous servers terminated successfully.${NC}"
 
-# Activate virtual environment if exists
-echo -e "${YELLOW}[3/5] Setting up environment...${NC}"
-if [ -d ".venv" ]; then
-    echo -e "${GREEN}Activating virtual environment...${NC}"
-    source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null
-fi
+# API Environment Setup and Server Start
+APIDIR="api"
+START_API_SCRIPT="start_api.py"
+API_VENV_PATH="$APIDIR/.venv"
 
-# Start FastAPI server in background
-echo -e "${YELLOW}[4/5] Starting FastAPI server on port 8001...${NC}"
-echo -e "${BLUE}Running: python start_api.py${NC}"
-python start_api.py &
-FASTAPI_PID=$!
+echo -e "${YELLOW}[3/5] Setting up API environment and starting server...${NC}"
+
+if [ -d "$API_VENV_PATH" ]; then
+    echo -e "${GREEN}Found API virtual environment at $API_VENV_PATH${NC}"
+    echo -e "${BLUE}Changing to API directory: $APIDIR/${NC}"
+    cd "$APIDIR" || { echo -e "${RED}Failed to cd into $APIDIR directory${NC}"; exit 1; }
+    
+    echo -e "${GREEN}Activating virtual environment...${NC}"
+    source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null || { echo -e "${RED}Failed to activate virtual environment in $APIDIR ${NC}"; cd "$PROJECT_ROOT"; exit 1; }
+    
+    echo -e "${YELLOW}Starting FastAPI server on port 8001 from $(pwd)...${NC}"
+    echo -e "${BLUE}Running: python $START_API_SCRIPT${NC}"
+    python "$START_API_SCRIPT" &
+    FASTAPI_PID=$!
+
+    echo -e "${GREEN}Returning to project root: $PROJECT_ROOT${NC}"
+    cd "$PROJECT_ROOT" || { echo -e "${RED}Failed to cd back to project root${NC}"; exit 1; }
+else
+    echo -e "${YELLOW}API virtual environment ($API_VENV_PATH) not found.${NC}"
+    echo -e "${YELLOW}Attempting to start API server using: python $APIDIR/$START_API_SCRIPT${NC}"
+    if [ -f "$APIDIR/$START_API_SCRIPT" ]; then
+        python "$APIDIR/$START_API_SCRIPT" &
+        FASTAPI_PID=$!
+    else
+        echo -e "${RED}❌ API start script ($APIDIR/$START_API_SCRIPT) not found!${NC}"
+        exit 1
+    fi
+fi
 
 # Wait for FastAPI to start
 echo -e "${GREEN}Waiting for FastAPI server to initialize...${NC}"
@@ -84,14 +105,29 @@ fi
 # Start Expo in a new terminal window if possible
 echo -e "${YELLOW}[5/5] Starting Expo server on port 8081...${NC}"
 
-# Change to the voicetask directory if it exists
-if [ -d "voicetask" ]; then
-    cd voicetask || exit 1
+EXPO_APP_DIR="voicetask" # Corrected Expo app directory
+
+# Check if Expo app directory exists
+if [ ! -d "$EXPO_APP_DIR" ]; then
+    echo -e "${RED}❌ Expo app directory '$EXPO_APP_DIR' not found in $PROJECT_ROOT! Exiting.${NC}"
+    exit 1
 fi
+
+# Check for necessary Expo files in the Expo app directory
+if [ ! -f "$EXPO_APP_DIR/package.json" ] || [ ! -f "$EXPO_APP_DIR/app.json" ] ; then
+    echo -e "${RED}❌ Expo project files (package.json or app.json) not found in $PROJECT_ROOT/$EXPO_APP_DIR.${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}Changing to Expo app directory: $PROJECT_ROOT/$EXPO_APP_DIR${NC}"
+cd "$EXPO_APP_DIR" || { echo -e "${RED}Failed to cd into $EXPO_APP_DIR directory${NC}"; exit 1; }
+
+echo -e "${GREEN}Expo will be started from: $(pwd)${NC}"
 
 # Check if we can open a new terminal window (macOS)
 if [ "$(uname)" == "Darwin" ]; then
     echo -e "${BLUE}Opening new terminal for Expo server...${NC}"
+    # $PWD is now the EXPO_APP_DIR, so just use $PWD
     osascript -e "tell application \"Terminal\" to do script \"cd \\\"$PWD\\\" && npx expo start\""
     echo -e "${GREEN}✅ Expo server starting in a new terminal window${NC}"
 # For Windows (using WSL or Git Bash)
