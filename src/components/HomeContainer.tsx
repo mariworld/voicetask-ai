@@ -37,9 +37,6 @@ const HomeContainer = () => {
     setError(null);
     
     try {
-      // Log information for debugging
-      console.log(`Recording received: size=${audioBlob.size}B, type=${audioBlob.type}`);
-      
       // Process the audio based on the browser
       let processedBlob = audioBlob;
       
@@ -48,13 +45,11 @@ const HomeContainer = () => {
         // If type is empty or not specified, try to set an appropriate type
         if (!audioBlob.type || audioBlob.type === 'audio/' || audioBlob.type === '') {
           processedBlob = new Blob([audioBlob], { type: 'audio/mp4' });
-          console.log('Set blob type to audio/mp4 for iOS/Safari');
         }
       } else {
         // For other browsers, prefer webm format
         if (!audioBlob.type || audioBlob.type === 'audio/' || audioBlob.type === '') {
           processedBlob = new Blob([audioBlob], { type: 'audio/webm' });
-          console.log('Set blob type to audio/webm for other browsers');
         }
       }
       
@@ -65,17 +60,12 @@ const HomeContainer = () => {
         
         // Monitor if the audio can be played
         audioElement.onloadedmetadata = () => {
-          console.log(`Audio duration: ${audioElement.duration} seconds`);
           if (audioElement.duration < 0.5) {
-            console.warn('Audio is too short, may indicate recording issues');
+            // Audio is too short, may indicate recording issues
           }
         };
-        
-        audioElement.onerror = (e) => {
-          console.error('Error loading audio:', e);
-        };
       } catch (err) {
-        console.warn('Could not create test audio element:', err);
+        // Could not create test audio element
       }
 
       // For testing, we'll use the test endpoint that doesn't require authentication
@@ -86,20 +76,14 @@ const HomeContainer = () => {
           throw new Error('Audio file is too small to contain speech');
         }
         
-        console.log(`Sending audio for transcription: size=${processedBlob.size}B, type=${processedBlob.type}`);
         transcription = await voiceService.transcribeTest(processedBlob);
-        console.log('Transcription:', transcription);
       } catch (err) {
-        console.error('Transcription error:', err);
-        
         // If the first attempt fails, try with a different format
         if ((isIOS || isSafari) && processedBlob.type !== 'audio/mp4') {
           const mp4Blob = new Blob([audioBlob], { type: 'audio/mp4' });
-          console.log('Retrying with audio/mp4 format for iOS/Safari');
           transcription = await voiceService.transcribeTest(mp4Blob);
         } else if (!isIOS && !isSafari && processedBlob.type !== 'audio/webm') {
           const webmBlob = new Blob([audioBlob], { type: 'audio/webm' });
-          console.log('Retrying with audio/webm format for other browsers');
           transcription = await voiceService.transcribeTest(webmBlob);
         } else {
           throw err;
@@ -113,7 +97,6 @@ const HomeContainer = () => {
       }
       
       const extractedTasks = await voiceService.extractTasksTest(transcription);
-      console.log('Extracted tasks:', extractedTasks);
       
       // Add the extracted tasks to our task list
       if (extractedTasks && extractedTasks.length > 0) {
@@ -151,8 +134,6 @@ const HomeContainer = () => {
         setError(null);
       }
     } catch (error) {
-      console.error('Error processing audio:', error);
-      
       // Show a more helpful error message based on browser
       if (isIOS || isSafari) {
         setError('Safari had trouble processing your recording. Please try again and speak clearly. Make sure you are connected to the same WiFi as the server.');
@@ -166,7 +147,6 @@ const HomeContainer = () => {
   
   const handleAddToCalendar = (taskId: string) => {
     // In a real implementation, this would add the task to a calendar
-    console.log('Add to calendar', taskId);
   };
   
   const handleMarkDone = (taskId: string) => {

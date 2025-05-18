@@ -9,7 +9,6 @@ interface RecordButtonProps {
 const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [permissionAttempted, setPermissionAttempted] = useState(false);
@@ -43,16 +42,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
     async function setupAudioCapture() {
       setIsLoading(true);
       setError(null);
-      
-      // Log what's available for debugging
-      console.log(`Browser detection: iOS=${isIOS}, Safari=${isSafari}, Mobile=${isMobile}, Secure=${isSecureContext}`);
-      console.log('Navigator media capabilities:', {
-        mediaDevices: !!navigator.mediaDevices,
-        getUserMedia: !!navigator.mediaDevices?.getUserMedia,
-        webkitGetUserMedia: !!(navigator as any).webkitGetUserMedia,
-        mozGetUserMedia: !!(navigator as any).mozGetUserMedia
-      });
-      console.log('Current protocol:', window.location.protocol);
       
       try {
         // Check if we're in a browser with the required APIs
@@ -104,7 +93,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
           setPermissionAttempted(true);
         } catch (err) {
           if (isIOS && isSafari) {
-            console.warn('First iOS permission attempt failed, trying with basic constraints');
             // iOS Safari sometimes needs a simpler constraint object
             stream = await getUserMediaFn({ audio: true });
             setPermissionAttempted(true);
@@ -125,7 +113,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
         // Successfully got permission
         setHasPermission(true);
       } catch (err) {
-        console.error('Microphone setup error:', err);
         setPermissionAttempted(true);
         
         // Show appropriate error messages based on the error
@@ -163,7 +150,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
     try {
       setError(null);
       audioChunksRef.current = [];
-      setAudioUrl(null);
       
       // Get a fresh stream - try different approaches based on browser
       let stream;
@@ -172,7 +158,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
       
       while (!stream && attempts < maxAttempts) {
         attempts++;
-        console.log(`Audio capture attempt ${attempts}/${maxAttempts}`);
         
         try {
           if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -181,11 +166,9 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
               ? { audio: { echoCancellation: true, noiseSuppression: true } }
               : { audio: true }; // Simpler fallback
               
-            console.log(`Using mediaDevices.getUserMedia with constraints:`, constraints);
             stream = await navigator.mediaDevices.getUserMedia(constraints);
           } else if ((navigator as any).webkitGetUserMedia) {
             // Safari fallback
-            console.log('Using webkitGetUserMedia');
             stream = await new Promise<MediaStream>((resolve, reject) => {
               (navigator as any).webkitGetUserMedia({ audio: true }, resolve, reject);
             });
@@ -193,7 +176,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
             throw new Error('No getUserMedia method available');
           }
         } catch (err) {
-          console.warn(`Attempt ${attempts} failed:`, err);
           if (attempts >= maxAttempts) throw err;
         }
       }
@@ -223,20 +205,17 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
       }
       
       // Create MediaRecorder with appropriate options
-      console.log(`Creating MediaRecorder with options:`, options);
       const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       
       // Set up event handlers
       mediaRecorder.ondataavailable = (event) => {
-        console.log(`Data available: size=${event.data?.size || 0}`);
         if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
       
       mediaRecorder.onstop = () => {
-        console.log(`MediaRecorder stopped, collected ${audioChunksRef.current.length} chunks`);
         // Check if we collected any audio data
         if (audioChunksRef.current.length === 0) {
           setError('No audio data was captured. Please try again.');
@@ -248,11 +227,7 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         
         if (audioBlob.size > 0) {
-          const url = URL.createObjectURL(audioBlob);
-          setAudioUrl(url);
           onRecordingComplete(audioBlob);
-          
-          console.log(`Recording completed: size=${audioBlob.size}, type=${audioBlob.type}`);
         } else {
           setError('Recording failed - empty audio data');
         }
@@ -268,7 +243,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
       setIsRecording(true);
       
     } catch (err) {
-      console.error('Error starting recording:', err);
       setError('Failed to start recording. Please check your microphone access and try again.');
       setHasPermission(false);
     }
@@ -279,7 +253,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
       try {
         mediaRecorderRef.current.stop();
       } catch (err) {
-        console.error('Error stopping recording:', err);
         setError('Error stopping recording.');
       }
       setIsRecording(false);
@@ -372,12 +345,6 @@ const RecordButton = ({ onRecordingComplete }: RecordButtonProps) => {
           )}
         </svg>
       </button>
-      
-      {audioUrl && (
-        <div className="mt-4 w-full max-w-xs">
-          <audio src={audioUrl} controls className="w-full" />
-        </div>
-      )}
     </div>
   );
 };

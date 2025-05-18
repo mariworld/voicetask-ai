@@ -6,7 +6,6 @@ const API_BASE_URL = (() => {
     
     // Fix malformed URLs that are missing a hostname (e.g., http://:8003)
     if (apiUrl.match(/^https?:\/\/:/)) {
-      console.log("Found malformed API URL missing hostname, using localhost instead:", apiUrl);
       return apiUrl.replace(/^(https?:\/\/)(:)/, '$1localhost$2');
     }
     
@@ -14,11 +13,8 @@ const API_BASE_URL = (() => {
   }
   
   // Default fallback when no environment variable is set
-  console.log("No API URL in environment variables, using default: http://localhost:8003");
   return 'http://localhost:8003';
 })();
-
-console.log(`Using API base URL: ${API_BASE_URL}`);
 
 // Types
 interface Task {
@@ -207,8 +203,6 @@ export const voiceService = {
     const formData = new FormData();
     const filename = `recording.${getFileExtension(audioBlob.type)}`;
     formData.append('audio', audioBlob, filename);
-    
-    console.log(`Sending audio to process endpoint: ${filename}, size=${audioBlob.size}B, type=${audioBlob.type}`);
 
     const response = await fetch(`${API_BASE_URL}/api/v1/voice/process`, {
       method: 'POST',
@@ -226,11 +220,7 @@ export const voiceService = {
     const filename = `recording.${getFileExtension(audioBlob.type)}`;
     formData.append('audio', audioBlob, filename);
 
-    console.log(`Sending audio to transcribe endpoint: ${filename}, size=${audioBlob.size}B, type=${audioBlob.type}`);
-    
     try {
-      console.log(`Using API URL for testing: ${API_BASE_URL}`);
-      
       const response = await fetch(`${API_BASE_URL}/api/v1/voice/transcribe-test`, {
         method: 'POST',
         body: formData,
@@ -238,26 +228,19 @@ export const voiceService = {
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Transcription API error: ${response.status} ${response.statusText}`, errorText);
         throw new Error(`Failed to transcribe audio: ${response.status} ${response.statusText}`);
       }
       
       const result = await response.json();
-      console.log('Transcription result:', result);
       return result;
     } catch (error) {
-      console.error('Error in transcribeTest:', error);
       throw error;
     }
   },
 
   // Extract tasks from transcription without authentication (test endpoint)
   async extractTasksTest(transcription: string): Promise<Task[]> {
-    console.log(`Extracting tasks from transcription: "${transcription}"`);
-    
     try {
-      console.log(`Using API URL for testing: ${API_BASE_URL}`);
-      
       const response = await fetch(
         `${API_BASE_URL}/api/v1/voice/extract-tasks-test?transcription=${encodeURIComponent(transcription)}`,
         {
@@ -267,15 +250,12 @@ export const voiceService = {
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Task extraction API error: ${response.status} ${response.statusText}`, errorText);
         throw new Error(`Failed to extract tasks: ${response.status} ${response.statusText}`);
       }
       
       const result = await response.json();
-      console.log('Extracted tasks result:', result);
       return result;
     } catch (error) {
-      console.error('Error in extractTasksTest:', error);
       throw error;
     }
   },
