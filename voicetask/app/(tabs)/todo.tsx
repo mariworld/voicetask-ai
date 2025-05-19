@@ -9,10 +9,15 @@ import * as Haptics from 'expo-haptics';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { apiService } from '@/services/api';
-import { Swipeable } from 'react-native-gesture-handler';
+import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTaskStore, Task as TaskType } from '@/services/taskStore';
+import { useRouter } from 'expo-router';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+// import { AddTaskModal } from '@/components/AddTaskModal'; // Comment out unused import
 
-export default function TodoScreen() {
+// Create a named React component
+const TodoScreen = () => {
+  const router = useRouter();
   // Replace expo-audio hooks with direct expo-av usage
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
@@ -23,11 +28,12 @@ export default function TodoScreen() {
   // Get tasks and actions from the task store
   const allTasks = useTaskStore(state => state.tasks);
   const todoTasks = useMemo(() => {
-    return allTasks.filter(task => task.status === 'todo');
+    return allTasks.filter(task => task.status === 'To Do');
   }, [allTasks]);
   
   // Get store actions once to avoid re-renders
-  const { deleteTask, updateTaskStatus, toggleTaskCompletion, addTask } = useTaskStore.getState();
+  const { deleteTask, updateTaskStatus, toggleTaskCompletion, addTask, reorderTasks } = useTaskStore.getState();
+  const fetchTasks = useTaskStore(state => state.fetchTasks); // Ensure fetchTasks is in scope
   
   // Add new state for API integration
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -61,6 +67,9 @@ export default function TodoScreen() {
   
   // Add debug logs state
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  
+  // Add state for drag mode
+  const [dragEnabled, setDragEnabled] = useState(false);
 
   // Add debug logging function
   const addDebugLog = (message: string) => {
@@ -538,21 +547,17 @@ export default function TodoScreen() {
           addDebugLog(`⏹️ Recording stopped. URI: ${uri || 'none'}`);
           
           setRecording(null);
-          setAudioUri(uri || null);
+          // setAudioUri(uri || null); // We'll handle the audioUri state later or if needed for playback
           
-          // Visual feedback
           triggerFlash();
-          
-          // Provide haptic feedback when recording stops successfully
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           
           if (uri) {
-            // Transcribe the audio
-            addDebugLog('⏹️ Starting transcription...');
-            console.log('⏹️ Starting audio transcription');
-            transcribeAudio(uri);
+            addDebugLog('⚙️ Recording stopped, processing voice for tasks...');
+            console.log('⚙️ Recording stopped, processing voice for tasks. URI:', uri);
+            await processVoiceAndCreateTasks(uri);
           } else {
-            addDebugLog('⚠️ No audio file was created');
+            addDebugLog('⚠️ No audio file was created after stopping recording.');
             console.warn('⚠️ No URI returned after recording stopped');
             Alert.alert('Warning', 'The recording completed but no audio file was created. Please try again.');
           }
@@ -561,30 +566,22 @@ export default function TodoScreen() {
           addDebugLog(`❌ Error stopping recording: ${stopErrorMsg}`);
           console.error('❌ Error stopping recording:', stopError);
           
-          // Try an alternative approach to get the recording file
           try {
-            addDebugLog('⏹️ Trying alternative method to get recording file');
-            
-            // Some devices might still have created a file even if stopping failed
+            addDebugLog('⏹️ Trying alternative method to get recording file in catch block');
             const uri = recording.getURI();
             if (uri) {
               addDebugLog(`⏹️ Found recording URI through fallback: ${uri}`);
-              setAudioUri(uri);
-              
-              // Provide feedback
+              // setAudioUri(uri); // Again, handle global audioUri state carefully if needed elsewhere
               triggerFlash();
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              
-              // Attempt transcription
-              transcribeAudio(uri);
+              await processVoiceAndCreateTasks(uri);
             } else {
-              throw new Error('No URI available from recording');
+              throw new Error('No URI available from recording in fallback');
             }
           } catch (fallbackError) {
             addDebugLog(`❌ Fallback method failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
             Alert.alert('Error', 'Failed to save recording. Please try again.');
           } finally {
-            // Clean up recording object regardless
             setRecording(null);
           }
         }
@@ -614,40 +611,33 @@ export default function TodoScreen() {
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  // Transcribe audio using API
-  async function transcribeAudio(uri: string) {
+  // New function to handle the combined voice processing and task creation
+  async function processVoiceAndCreateTasks(audioFileUri: string) {
     try {
-      console.log('🔤 Starting transcription for URI:', uri);
-      addDebugLog('🔤 Starting transcription');
-      setIsTranscribing(true);
+      setIsProcessingTasks(true); // Indicate processing starts
+      addDebugLog('📞 Calling apiService.processVoice with URI: ' + audioFileUri);
       
-      // Log audio file details before sending to API
-      console.log('🔤 Sending audio file to transcription API');
+      const createdTasksFromDB: TaskType[] = await apiService.processVoice(audioFileUri);
       
-      const result = await apiService.transcribeAudio(uri);
-      console.log('🔤 Transcription result received:', result);
-      addDebugLog('🔤 Transcription received');
-      
-      setTranscription(result);
-      
-      // After transcription, extract tasks
-      if (result) {
-        console.log('🔤 Transcription successful, extracting tasks');
-        addDebugLog('🔤 Extracting tasks');
-        extractTasks(result);
+      addDebugLog(`✅ Received ${createdTasksFromDB.length} tasks from apiService.processVoice.`);
+
+      if (createdTasksFromDB && createdTasksFromDB.length > 0) {
+        // Add the tasks (which are now confirmed from the DB) to the local Zustand store
+        // createdTasksFromDB.forEach((task: TaskType) => {
+        //   addTask(task);
+        // });
+        Alert.alert('Success', `Added ${createdTasksFromDB.length} new task(s) from your voice recording. Refreshing list...`);
+        await fetchTasks(); // Re-fetch tasks from server
       } else {
-        console.log('🔤 Transcription returned empty result');
-        addDebugLog('🔤 Empty transcription result');
+        Alert.alert('No tasks created', 'No tasks were detected or created from your voice recording.');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      addDebugLog(`❌ Transcription error: ${errorMessage}`);
-      console.error('❌ Transcription error:', error);
-      Alert.alert('Error', 'Failed to transcribe audio');
+      addDebugLog(`❌ Error in processVoiceAndCreateTasks: ${errorMessage}`);
+      console.error('❌ Error in processVoiceAndCreateTasks:', error);
+      Alert.alert('Error', 'Failed to process voice and create tasks: ' + errorMessage);
     } finally {
-      setIsTranscribing(false);
-      console.log('🔤 Transcription process completed');
-      addDebugLog('🔤 Transcription process completed');
+      setIsProcessingTasks(false); // Indicate processing is finished
     }
   }
   
@@ -704,38 +694,6 @@ export default function TodoScreen() {
     }
   }
   
-  // Extract tasks from transcription
-  async function extractTasks(text: string) {
-    try {
-      setIsProcessingTasks(true);
-      const extractedTasks = await apiService.extractTasks(text);
-      
-      if (extractedTasks && extractedTasks.length > 0) {
-        // Use the task store to add tasks
-        const newTasks = extractedTasks.map((task: any, index: number) => ({
-          id: `new-${Date.now()}-${index}`,
-          title: task.title,
-          completed: task.status === 'Done',
-          status: task.status === 'Done' ? 'done' : 'todo'
-        }));
-        
-        // Use the pre-fetched addTask function to avoid re-renders
-        newTasks.forEach((task: TaskType) => {
-          addTask(task);
-        });
-        
-        Alert.alert('Success', `Added ${newTasks.length} new task(s) from your voice recording`);
-      } else {
-        Alert.alert('No tasks found', 'No tasks were detected in your voice recording');
-      }
-    } catch (error) {
-      console.error('Task extraction error:', error);
-      Alert.alert('Error', 'Failed to extract tasks from transcription');
-    } finally {
-      setIsProcessingTasks(false);
-    }
-  }
-
   // Handle swipeable open
   const handleSwipeableOpen = (id: string) => {
     // If there's already an open swipeable and it's different from this one, close it
@@ -777,7 +735,7 @@ export default function TodoScreen() {
         {/* Already in ToDo tab, so only show other options */}
         <TouchableOpacity 
           style={[styles.statusButton, styles.inProgressButton]}
-          onPress={() => updateTaskStatus(id, 'in-progress')}
+          onPress={() => updateTaskStatus(id, 'In Progress')}
         >
           <Ionicons name="hourglass-outline" size={22} color="white" />
           <Text style={styles.statusButtonText}>In Progress</Text>
@@ -785,7 +743,7 @@ export default function TodoScreen() {
         
         <TouchableOpacity 
           style={[styles.statusButton, styles.doneButton]}
-          onPress={() => updateTaskStatus(id, 'done')}
+          onPress={() => updateTaskStatus(id, 'Done')}
         >
           <Ionicons name="checkmark-circle-outline" size={22} color="white" />
           <Text style={styles.statusButtonText}>Done</Text>
@@ -813,157 +771,252 @@ export default function TodoScreen() {
     }
   };
 
+  // Handle task reordering
+  const handleDragEnd = useCallback(({ data }: { data: TaskType[] }) => {
+    // Update the task store with the new order
+    reorderTasks(data);
+    // Provide haptic feedback
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    // Log the reordering
+    addDebugLog(`🔄 Tasks reordered: ${data.map(task => task.id).join(', ')}`);
+  }, []);
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <ThemedText type="title">Hey Mari, today is {dateString}</ThemedText>
-      </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <ThemedText type="title">Hey Mari, today is {dateString}</ThemedText>
+        </View>
 
-   
-      {/* Flash overlay for visual feedback */}
-      <Animated.View 
-        style={[
-          styles.flashOverlay,
-          { opacity: flashAnim }
-        ]} 
-      />
+     
+        {/* Flash overlay for visual feedback */}
+        <Animated.View 
+          style={[
+            styles.flashOverlay,
+            { opacity: flashAnim }
+          ]} 
+        />
 
-      {/* Voice Recording Button */}
-      <View style={styles.recordingContainer}>
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-          <TouchableOpacity
-            activeOpacity={0.5}
-            style={[
-              styles.recordButton,
-              hasMicPermission === false ? styles.recordButtonDisabled : null,
-              isButtonPressed ? styles.recordButtonPressed : null,
-              recordButtonStyle // Use non-animated style instead of buttonBackgroundColor
-            ]}
-            onPress={handleMicButtonPress}
-            onPressIn={() => {
-              console.log('🎤 Button press detected (onPressIn)');
-              setIsButtonPressed(true);
-              // Add immediate haptic feedback on press
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
-            onPressOut={() => {
-              console.log('🎤 Button press released (onPressOut)');
-              setIsButtonPressed(false);
-            }}
-            disabled={hasMicPermission === false || isTranscribing}
-          >
-            {isTranscribing || isProcessingTasks ? (
-              <ActivityIndicator size="large" color="white" />
-            ) : (
-              <View style={styles.buttonContent}>
-                <Ionicons
-                  name={isRecording ? "mic-off" : "mic"}
-                  size={40}
-                  color="white"
-                  style={styles.micIcon}
-                />
-                <Text style={styles.buttonIconText}>
-                  {isRecording ? "STOP" : "REC"}
-                </Text>
-                {isRecording && (
-                  <Animated.View 
-                    style={[
-                      styles.recordingIndicator,
-                      { opacity: recordingIndicatorAnim }
-                    ]} 
+        {/* Voice Recording Button */}
+        <View style={styles.recordingContainer}>
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <TouchableOpacity
+              activeOpacity={0.5}
+              style={[
+                styles.recordButton,
+                hasMicPermission === false ? styles.recordButtonDisabled : null,
+                isButtonPressed ? styles.recordButtonPressed : null,
+                recordButtonStyle // Use non-animated style instead of buttonBackgroundColor
+              ]}
+              onPress={handleMicButtonPress}
+              onPressIn={() => {
+                console.log('🎤 Button press detected (onPressIn)');
+                setIsButtonPressed(true);
+                // Add immediate haptic feedback on press
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              onPressOut={() => {
+                console.log('🎤 Button press released (onPressOut)');
+                setIsButtonPressed(false);
+              }}
+              disabled={hasMicPermission === false || isTranscribing}
+            >
+              {isTranscribing || isProcessingTasks ? (
+                <ActivityIndicator size="large" color="white" />
+              ) : (
+                <View style={styles.buttonContent}>
+                  <Ionicons
+                    name={isRecording ? "mic-off" : "mic"}
+                    size={40}
+                    color="white"
+                    style={styles.micIcon}
                   />
-                )}
+                  <Text style={styles.buttonIconText}>
+                    {isRecording ? "STOP" : "REC"}
+                  </Text>
+                  {isRecording && (
+                    <Animated.View 
+                      style={[
+                        styles.recordingIndicator,
+                        { opacity: recordingIndicatorAnim }
+                      ]} 
+                    />
+                  )}
+                </View>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+          
+          {/* Permission message when denied */}
+          {hasMicPermission === false && (
+            <Text style={styles.errorText}>
+              Microphone access denied. Please enable in settings.
+            </Text>
+          )}
+          
+          {/* Recording status text */}
+          {isRecording && (
+            <View style={styles.recordingStatusContainer}>
+              <Text style={styles.recordingText}>● RECORDING</Text>
+              <Text style={styles.durationText}>{formatDuration(recordingDuration)}</Text>
+            </View>
+          )}
+          
+          {/* Ready to record indicator when not recording */}
+          {!isRecording && !isTranscribing && !isProcessingTasks && (
+            <View style={styles.recordingStatusContainer}>
+              <Text style={styles.readyText}>Tap microphone to record</Text>
+            </View>
+          )}
+          
+          {/* Status indicator */}
+          {isTranscribing && (
+            <Text style={styles.statusText}>Transcribing your voice...</Text>
+          )}
+          {isProcessingTasks && (
+            <Text style={styles.statusText}>Extracting tasks...</Text>
+          )}
+        </View>
+
+        {/* Empty state for when there are no tasks */}
+        {isProcessingTasks && todoTasks.length === 0 && !isTranscribing && (
+          <View style={styles.emptyStateContainer}>
+            <ActivityIndicator size="large" color="#4285F4" />
+            <Text style={styles.emptyStateText}>Processing new tasks...</Text>
+            <Text style={styles.emptyStateSubText}>Your tasks will appear here shortly.</Text>
+          </View>
+        )}
+
+        {!isProcessingTasks && todoTasks.length === 0 && !isTranscribing && (
+          <View style={styles.emptyStateContainer}>
+            <Ionicons name="list" size={50} color="#CCCCCC" />
+            <Text style={styles.emptyStateText}>No tasks to do</Text>
+            <Text style={styles.emptyStateSubText}>Record a task or swipe to move tasks here</Text>
+          </View>
+        )}
+
+        {/* Task List - Replaced ScrollView with DraggableFlatList */}
+        {todoTasks.length > 0 && (
+          <>
+            {isProcessingTasks && !isTranscribing && (
+              <View style={styles.processingTasksHeader}>
+                <ActivityIndicator size="small" color="#4285F4" />
+                <Text style={styles.processingTasksHeaderText}>
+                  Adding new tasks to your list...
+                </Text>
               </View>
             )}
-          </TouchableOpacity>
-        </Animated.View>
-        
-        {/* Permission message when denied */}
-        {hasMicPermission === false && (
-          <Text style={styles.errorText}>
-            Microphone access denied. Please enable in settings.
-          </Text>
-        )}
-        
-        {/* Recording status text */}
-        {isRecording && (
-          <View style={styles.recordingStatusContainer}>
-            <Text style={styles.recordingText}>● RECORDING</Text>
-            <Text style={styles.durationText}>{formatDuration(recordingDuration)}</Text>
-          </View>
-        )}
-        
-        {/* Ready to record indicator when not recording */}
-        {!isRecording && !isTranscribing && !isProcessingTasks && (
-          <View style={styles.recordingStatusContainer}>
-            <Text style={styles.readyText}>Tap microphone to record</Text>
-          </View>
-        )}
-        
-        {/* Status indicator */}
-        {isTranscribing && (
-          <Text style={styles.statusText}>Transcribing your voice...</Text>
-        )}
-        {isProcessingTasks && (
-          <Text style={styles.statusText}>Extracting tasks...</Text>
-        )}
-      </View>
+            <View style={styles.dragInstructionContainer}>
 
-      {/* Empty state for when there are no tasks */}
-      {todoTasks.length === 0 && (
-        <View style={styles.emptyStateContainer}>
-          <Ionicons name="list" size={50} color="#CCCCCC" />
-          <Text style={styles.emptyStateText}>No tasks to do</Text>
-          <Text style={styles.emptyStateSubText}>Record a task or swipe to move tasks here</Text>
-        </View>
-      )}
-
-      {/* Task List */}
-      {todoTasks.length > 0 && (
-        <ScrollView 
-          style={styles.tasksContainer}
-          contentContainerStyle={{ paddingBottom: 100 }}
-        >
-          {todoTasks.map((task: TaskType) => (
-            <Swipeable
-              key={task.id}
-              ref={(ref) => {
-                swipeableRefs.current.set(task.id, ref);
-              }}
-              renderRightActions={() => renderRightActions(task.id)}
-              renderLeftActions={() => renderLeftActions(task.id)}
-              onSwipeableOpen={(direction) => handleSwipeableOpen(task.id)}
-              overshootLeft={false}
-              overshootRight={false}
-            >
-              <View style={styles.taskItem}>
-                <TouchableOpacity
-                  style={styles.taskCheckbox}
-                  onPress={() => toggleTaskCompletion(task.id)}
+              {dragEnabled && (
+                <TouchableOpacity 
+                  style={styles.dragModeButton}
+                  onPress={() => setDragEnabled(false)}
                 >
-                  {task.completed ? (
-                    <Ionicons name="checkmark-circle" size={24} color="green" />
-                  ) : (
-                    <Ionicons name="ellipse-outline" size={24} color="gray" />
-                  )}
+                  <Text style={styles.dragModeButtonText}>Done</Text>
                 </TouchableOpacity>
-                <Text style={[styles.taskTitle, task.completed && styles.completedTask]}>
-                  {task.title}
-                </Text>
-                
-                <TouchableOpacity style={styles.calendarButton}>
-                  <Ionicons name="calendar-outline" size={24} color="gray" />
-                  <Text style={styles.calendarText}>Calendar</Text>
-                </TouchableOpacity>
-              </View>
-            </Swipeable>
-          ))}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+              )}
+            </View>
+            <DraggableFlatList
+              data={todoTasks}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, drag, isActive }) => {
+                if (dragEnabled) {
+                  return (
+                    <ScaleDecorator>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onLongPress={drag}
+                        disabled={isActive}
+                        style={[
+                          styles.taskItem, 
+                          isActive && styles.taskItemActive
+                        ]}
+                      >
+                        <TouchableOpacity
+                          style={styles.taskCheckbox}
+                          onPress={() => toggleTaskCompletion(item.id)}
+                        >
+                          {item.completed ? (
+                            <Ionicons name="checkmark-circle" size={24} color="green" />
+                          ) : (
+                            <Ionicons name="ellipse-outline" size={24} color="gray" />
+                          )}
+                        </TouchableOpacity>
+                        <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                          {item.title}
+                        </Text>
+                        <Ionicons name="menu" size={24} color="#BBBBBB" style={styles.dragHandle} />
+                      </TouchableOpacity>
+                    </ScaleDecorator>
+                  );
+                } else {
+                  return (
+                    <Swipeable
+                      key={item.id}
+                      ref={(ref) => {
+                        swipeableRefs.current.set(item.id, ref);
+                      }}
+                      renderRightActions={() => renderRightActions(item.id)}
+                      renderLeftActions={() => renderLeftActions(item.id)}
+                      onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                      overshootLeft={false}
+                      overshootRight={false}
+                    >
+                      <TouchableOpacity 
+                        activeOpacity={0.7}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                        onLongPress={() => {
+                          setDragEnabled(true);
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        }}
+                      >
+                        <View style={styles.taskItem}>
+                          <TouchableOpacity
+                            style={styles.taskCheckbox}
+                            onPress={() => toggleTaskCompletion(item.id)}
+                          >
+                            {item.completed ? (
+                              <Ionicons name="checkmark-circle" size={24} color="green" />
+                            ) : (
+                              <Ionicons name="ellipse-outline" size={24} color="gray" />
+                            )}
+                          </TouchableOpacity>
+                          <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                            {item.title}
+                          </Text>
+                          <TouchableOpacity 
+                            style={styles.dueDateTouchable}
+                            onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                          >
+                            <Text style={styles.dueDateText}>
+                              {item.dueDate 
+                                ? new Date(item.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+                                : "Add Due Date"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </TouchableOpacity>
+                    </Swipeable>
+                  );
+                }
+              }}
+              containerStyle={styles.tasksContainer}
+              contentContainerStyle={{ paddingBottom: 100 }}
+              onDragEnd={handleDragEnd}
+              activationDistance={20}
+            />
+          </>
+        )}
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
-}
+};
+
+// Explicitly export the component as default
+export default TodoScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -1086,18 +1139,13 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#AAAAAA',
   },
-  calendarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F0F0',
-    borderRadius: 15,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  dueDateTouchable: {
+    marginLeft: 10, // Add some space between title and due date
+    paddingVertical: 5, // Make it easier to tap
   },
-  calendarText: {
+  dueDateText: {
     fontSize: 12,
-    marginLeft: 5,
-    color: '#666',
+    color: '#007AFF', // Blue color to indicate interactivity
   },
   flashOverlay: {
     position: 'absolute',
@@ -1256,5 +1304,56 @@ const styles = StyleSheet.create({
     marginTop: 5,
     textAlign: 'center',
     paddingHorizontal: 40,
+  },
+  // Drag and drop styles
+  taskItemActive: {
+    backgroundColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
+    transform: [{ scale: 1.02 }],
+  },
+  dragHandle: {
+    marginLeft: 10,
+  },
+  dragInstructionContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#F5F5F5',
+  },
+  dragInstructionText: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+    flex: 1,
+  },
+  dragModeButton: {
+    backgroundColor: '#4285F4',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+  dragModeButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // New styles for processing tasks header
+  processingTasksHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    backgroundColor: '#EFEFEF',
+  },
+  processingTasksHeaderText: {
+    marginLeft: 10,
+    fontSize: 12,
+    color: '#333333',
   },
 }); 

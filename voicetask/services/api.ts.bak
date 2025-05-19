@@ -17,12 +17,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 60000, // Increased timeout to 60 seconds
-  maxRedirects: 5, // Allow redirects and maintain headers
-  withCredentials: false, // Don't send cookies (but do maintain headers)
 });
-
-// Ensure redirect behavior is consistent
-api.defaults.maxRedirects = 5;
 
 // Add an interceptor to include auth token in requests
 api.interceptors.request.use(
@@ -182,7 +177,7 @@ export const apiService = {
       formData.append('audio', fileObj as any);
       
       // Set up headers and endpoint
-      const headers: Record<string, string> = {
+      const headers = {
         'Accept': 'application/json',
         'Content-Type': 'multipart/form-data',
       };
@@ -317,7 +312,7 @@ export const apiService = {
       } as any);
 
       // Set up headers
-      const headers: Record<string, string> = {
+      const headers = {
         'Content-Type': 'multipart/form-data',
       };
       
@@ -359,111 +354,12 @@ export const apiService = {
   async getTasks() {
     try {
       console.log('🔄 API: Fetching tasks for authenticated user');
-      
-      // Get token directly
-      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      
-      // Make request with explicit auth header
-      const response = await api.get('/tasks/', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        } as Record<string, string>
-      });
-      
+      const response = await api.get('/tasks');
       console.log('🔄 API: Fetched tasks:', response.data);
       return response.data;
     } catch (error) {
       console.error('❌ API: Error fetching tasks:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('❌ API: Axios error details:', {
-          response: error.response?.data,
-          status: error.response?.status,
-          headers: error.response?.headers,
-        });
-      }
       throw new Error('Failed to fetch tasks');
-    }
-  },
-
-  /**
-   * Delete a task by ID
-   * @param taskId - The ID of the task to delete
-   * @returns True if deletion was successful
-   */
-  async deleteTask(taskId: string) {
-    try {
-      console.log('🗑️ API: Deleting task with ID:', taskId);
-      
-      // Get token directly
-      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      
-      // Make request with explicit auth header
-      const response = await api.delete(`/tasks/${taskId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        } as Record<string, string>
-      });
-      
-      console.log('🗑️ API: Task deleted successfully');
-      return true;
-    } catch (error) {
-      console.error('❌ API: Error deleting task:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('❌ API: Axios error details:', {
-          response: error.response?.data,
-          status: error.response?.status,
-          headers: error.response?.headers,
-        });
-      }
-      throw new Error('Failed to delete task');
-    }
-  },
-
-  /**
-   * Update a task's status
-   * @param taskId - The ID of the task to update
-   * @param status - The new status
-   * @returns The updated task
-   */
-  async updateTaskStatus(taskId: string, status: 'To Do' | 'In Progress' | 'Done') {
-    try {
-      console.log(`🔄 API: Updating task ${taskId} status to: ${status}`);
-      
-      // Get token directly
-      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      
-      // Create properly typed headers
-      const headers: Record<string, string> = {
-        'Authorization': `Bearer ${token}`
-      };
-      
-      // Make request with explicit auth header
-      const response = await api.put(`/tasks/${taskId}`, 
-        { status },
-        { headers }
-      );
-      
-      console.log('🔄 API: Task status updated successfully');
-      return response.data;
-    } catch (error) {
-      console.error('❌ API: Error updating task status:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('❌ API: Axios error details:', {
-          response: error.response?.data,
-          status: error.response?.status,
-          headers: error.response?.headers,
-        });
-      }
-      throw new Error('Failed to update task status');
     }
   }
 }; 

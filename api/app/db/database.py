@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   user_id uuid REFERENCES auth.users NOT NULL,
   title text NOT NULL,
   status text NOT NULL DEFAULT 'To Do',
+  description text NULL,
+  due_date timestamp with time zone NULL,
+  priority text NULL, 
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   updated_at timestamp with time zone DEFAULT now() NOT NULL
 );

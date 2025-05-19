@@ -91,6 +91,50 @@ async def extract_tasks_test(
     
     return tasks
 
+@router.post("/process-test", response_model=List[TaskResponse])
+async def process_voice_test(
+    audio: UploadFile = File(...)
+):
+    """
+    Test endpoint: Process voice audio into tasks without authentication
+    Uses the test user ID for task creation
+    """
+    # Use the test user ID
+    test_user_id = "180a8d2e-642c-4023-a1dd-008af40b4fd2"
+    
+    # Read audio content
+    audio_content = await audio.read()
+    print(f"Processing audio for test user, size: {len(audio_content)} bytes")
+    
+    # Transcribe audio
+    transcription = await voice_service.transcribe_audio(audio_content)
+    print(f"Transcription result: {transcription}")
+    
+    if not transcription:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to transcribe audio"
+        )
+    
+    # Extract tasks from transcription
+    task_creates = await voice_service.extract_tasks(transcription)
+    print(f"Extracted tasks: {task_creates}")
+    
+    if not task_creates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to extract tasks from transcription"
+        )
+    
+    # Create tasks in database
+    created_tasks = []
+    for task_create in task_creates:
+        task = await task_service.create_task(test_user_id, task_create)
+        if task:
+            created_tasks.append(task)
+    
+    return created_tasks
+
 @router.post("/transcribe", response_model=str)
 async def transcribe_audio(
     audio: UploadFile = File(...),
