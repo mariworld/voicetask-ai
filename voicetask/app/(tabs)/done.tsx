@@ -6,12 +6,14 @@ import { ThemedText } from '@/components/ThemedText';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { useTaskStore, Task as TaskType } from '@/services/taskStore';
+import { useRouter } from 'expo-router';
 
 export default function DoneScreen() {
+  const router = useRouter();
   // Get tasks and actions from the task store
   const allTasks = useTaskStore(state => state.tasks);
   const doneTasks = useMemo(() => 
-    allTasks.filter(task => task.status === 'done'), 
+    allTasks.filter(task => task.status === 'Done'), 
     [allTasks]
   );
   // Get store actions once to avoid re-renders
@@ -61,7 +63,7 @@ export default function DoneScreen() {
       <View style={styles.statusActionsContainer}>
         <TouchableOpacity 
           style={[styles.statusButton, styles.todoButton]}
-          onPress={() => updateTaskStatus(id, 'todo')}
+          onPress={() => updateTaskStatus(id, 'To Do')}
         >
           <Ionicons name="list" size={22} color="white" />
           <Text style={styles.statusButtonText}>To Do</Text>
@@ -69,7 +71,7 @@ export default function DoneScreen() {
         
         <TouchableOpacity 
           style={[styles.statusButton, styles.inProgressButton]}
-          onPress={() => updateTaskStatus(id, 'in-progress')}
+          onPress={() => updateTaskStatus(id, 'In Progress')}
         >
           <Ionicons name="hourglass-outline" size={22} color="white" />
           <Text style={styles.statusButtonText}>In Progress</Text>
@@ -121,9 +123,15 @@ export default function DoneScreen() {
                 <Text style={[styles.taskTitle, styles.completedTask]}>
                   {task.title}
                 </Text>
-                <TouchableOpacity style={styles.calendarButton}>
-                  <Ionicons name="calendar-outline" size={24} color="gray" />
-                  <Text style={styles.calendarText}>Calendar</Text>
+                <TouchableOpacity 
+                  style={styles.dueDateTouchable}
+                  onPress={() => router.push({ pathname: '/task-detail', params: { id: task.id } })}
+                >
+                  <Text style={styles.dueDateText}>
+                    {task.dueDate 
+                      ? new Date(task.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+                      : "Set Due Date"}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </Swipeable>
@@ -166,18 +174,13 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#AAAAAA',
   },
-  calendarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F0F0',
-    borderRadius: 15,
-    paddingHorizontal: 10,
+  dueDateTouchable: {
+    marginLeft: 10,
     paddingVertical: 5,
   },
-  calendarText: {
+  dueDateText: {
     fontSize: 12,
-    marginLeft: 5,
-    color: '#666',
+    color: '#007AFF',
   },
   // Status action buttons styles
   statusActionsContainer: {
