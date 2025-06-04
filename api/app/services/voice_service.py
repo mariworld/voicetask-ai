@@ -3,12 +3,169 @@ import tempfile
 import json
 import traceback
 from typing import Optional, List
+from datetime import datetime, timedelta, timezone
+import re
 from openai import OpenAI
 from ..config import settings
 from ..schemas.task import TaskCreate
 
 # Initialize OpenAI client
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+def parse_date_from_text(text: str, timezone_offset_minutes: Optional[int] = None) -> Optional[datetime]:
+    """
+    Parse natural language date/time expressions into timezone-aware datetime objects (UTC)
+    
+    Args:
+        text: Natural language text containing date/time
+        timezone_offset_minutes: User's timezone offset in minutes from UTC (e.g., -420 for PDT)
+    """
+    if not text:
+        return None
+        
+    print(f"Parsing date from text: {text}")
+    print(f"User timezone offset: {timezone_offset_minutes} minutes")
+    
+    # Calculate user's timezone
+    if timezone_offset_minutes is not None:
+        # JavaScript getTimezoneOffset() returns negative for ahead of UTC
+        # So PDT (-7 hours) returns +420 minutes
+        user_tz = timezone(timedelta(minutes=-timezone_offset_minutes))
+        now = datetime.now(user_tz)
+    else:
+        # Fallback to UTC if no timezone provided
+        user_tz = timezone.utc
+        now = datetime.now(timezone.utc)
+    
+    print(f"Current time in user timezone: {now}")
+    
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Time patterns (12-hour format)
+    time_patterns = [
+        r'(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)',  # 3:30 PM, 6:00 a.m.
+        r'(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)',          # 6 PM, 3 a.m.
+    ]
+    
+    time_match = None
+    for pattern in time_patterns:
+        time_match = re.search(pattern, text, re.IGNORECASE)
+        if time_match:
+            break
+    
+    # Extract time components
+    if time_match:
+        if len(time_match.groups()) == 3:  # hour:minute format
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            am_pm = time_match.group(3).lower()
+        else:  # hour only format
+            hour = int(time_match.group(1))
+            minute = 0
+            am_pm = time_match.group(2).lower()
+        
+        # Convert to 24-hour format
+        if 'p' in am_pm and hour != 12:
+            hour += 12
+        elif 'a' in am_pm and hour == 12:
+            hour = 0
+        
+        print(f"Extracted time: {hour:02d}:{minute:02d}")
+    else:
+        hour, minute = 9, 0  # Default time: 9:00 AM
+        print(f"No time found, using default: {hour:02d}:{minute:02d}")
+    
+    # Date patterns
+    result_date = None
+    
+    # Check for relative dates
+    if re.search(r'\btoday\b', text, re.IGNORECASE):
+        result_date = today
+        print("Found: today")
+    elif re.search(r'\btomorrow\b', text, re.IGNORECASE):
+        result_date = today + timedelta(days=1)
+        print("Found: tomorrow")
+    elif re.search(r'\bnext week\b', text, re.IGNORECASE):
+        result_date = today + timedelta(weeks=1)
+        print("Found: next week")
+    
+    # Check for day names
+    if not result_date:
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        for i, day in enumerate(days):
+            if re.search(rf'\b{day}\b', text, re.IGNORECASE):
+                days_ahead = (i - today.weekday()) % 7
+                if days_ahead == 0:  # If it's the same day of week, assume next week
+                    days_ahead = 7
+                result_date = today + timedelta(days=days_ahead)
+                print(f"Found day: {day}, {days_ahead} days ahead")
+                break
+    
+    # Check for specific dates
+    if not result_date:
+        # Month names with day (e.g., "June 5th", "December 25")
+        month_pattern = r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b'
+        month_match = re.search(month_pattern, text, re.IGNORECASE)
+        
+        if month_match:
+            month_name = month_match.group(1).lower()
+            day = int(month_match.group(2))
+            
+            months = ['january', 'february', 'march', 'april', 'may', 'june',
+                     'july', 'august', 'september', 'october', 'november', 'december']
+            month = months.index(month_name) + 1
+            
+            # Determine year - use current year, but if date is >30 days in past, assume next year
+            year = now.year
+            try:
+                candidate_date = now.replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
+                if candidate_date < now - timedelta(days=30):
+                    year += 1
+                    candidate_date = now.replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
+                result_date = candidate_date
+                print(f"Found specific date: {month_name} {day}, {year}")
+            except ValueError:
+                print(f"Invalid date: {month_name} {day}")
+        
+        # Numeric date formats (e.g., "1/15", "12/25")
+        if not result_date:
+            date_pattern = r'\b(\d{1,2})/(\d{1,2})\b'
+            date_match = re.search(date_pattern, text)
+            
+            if date_match:
+                month = int(date_match.group(1))
+                day = int(date_match.group(2))
+                year = now.year
+                
+                try:
+                    candidate_date = now.replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
+                    if candidate_date < now - timedelta(days=30):
+                        year += 1
+                        candidate_date = now.replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
+                    result_date = candidate_date
+                    print(f"Found numeric date: {month}/{day}/{year}")
+                except ValueError:
+                    print(f"Invalid numeric date: {month}/{day}")
+    
+    # If no date found, use today
+    if not result_date:
+        result_date = today
+        print("No date found, using today")
+    
+    # Combine date and time in user's timezone
+    final_datetime = result_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # Convert to UTC for storage
+    if final_datetime.tzinfo is None:
+        # If no timezone info, assume it's in user's timezone
+        final_datetime = final_datetime.replace(tzinfo=user_tz)
+    
+    final_datetime_utc = final_datetime.astimezone(timezone.utc)
+    
+    print(f"Final datetime in user timezone: {final_datetime}")
+    print(f"Final datetime in UTC: {final_datetime_utc}")
+    
+    return final_datetime_utc
 
 class VoiceService:
     async def transcribe_audio(self, audio_content: bytes) -> Optional[str]:
@@ -368,58 +525,101 @@ class VoiceService:
             print(f"Error in basic WAV creation: {str(e)}")
             return None
             
-    async def extract_tasks(self, transcription: str) -> List[TaskCreate]:
+    async def extract_tasks(self, transcription: str, timezone_offset_minutes: Optional[int] = None) -> List[TaskCreate]:
         """
-        Extract tasks from transcribed text using OpenAI GPT
-        """
-        try:
-            # Prompt to extract tasks
-            system_prompt = """
-            You are an AI assistant that extracts tasks from transcribed voice notes.
-            Extract all tasks or action items from the provided text.
-            For each task, determine the status (To Do, In Progress, Done).
-            Respond with a JSON array where each task has 'title' and 'status'.
-            Example format:
-            {
-                "tasks": [
-                    {"title": "Call John about project", "status": "To Do"},
-                    {"title": "Submit quarterly report", "status": "In Progress"}
-                ]
-            }
-            """
-            
-            # Call OpenAI API to extract tasks
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Extract tasks from this transcription: {transcription}"}
-                ],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
-            
-            # Parse the response
-            response_content = response.choices[0].message.content
-            tasks_data = json.loads(response_content)
-            
-            # Convert to TaskCreate objects
-            tasks = []
-            for task_data in tasks_data.get("tasks", []):
-                # Default to "To Do" if status is not valid
-                status = task_data.get("status", "To Do")
-                if status not in ["To Do", "In Progress", "Done"]:
-                    status = "To Do"
-                    
-                tasks.append(TaskCreate(
-                    title=task_data.get("title"),
-                    status=status
-                ))
-            
-            return tasks
+        Extract tasks from transcription text using OpenAI API
         
+        Args:
+            transcription: The transcribed text
+            timezone_offset_minutes: User's timezone offset in minutes from UTC
+        """
+        print(f"Extracting tasks from transcription: {transcription}")
+        print(f"User timezone offset: {timezone_offset_minutes} minutes")
+        
+        if not transcription or len(transcription.strip()) < 3:
+            return []
+
+        try:
+            # Enhanced prompt for better task extraction including dates/times
+            prompt = f"""
+            Extract tasks from the following transcription. For each task, identify:
+            1. The task title/description
+            2. Any due date or time mentioned
+            3. The status (assume "To Do" unless explicitly mentioned as done/complete)
+
+            Transcription: "{transcription}"
+
+            Return a JSON array of objects with this exact format:
+            [
+                {{
+                    "title": "task description",
+                    "status": "To Do",
+                    "due_date_text": "extracted date/time text or null"
+                }}
+            ]
+
+            Important rules:
+            - Extract ALL tasks mentioned, even if multiple
+            - Keep task titles concise but descriptive
+            - For due_date_text, extract the exact date/time phrase from transcription (e.g., "tomorrow at 3 PM", "June 5th", "today")
+            - If no date/time mentioned, set due_date_text to null
+            - Status should be "To Do" unless explicitly stated as completed
+            """
+
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that extracts structured task information from voice transcriptions. Always return valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=500
+            )
+
+            content = response.choices[0].message.content
+            print(f"OpenAI response: {content}")
+
+            # Parse JSON response
+            try:
+                tasks_data = json.loads(content)
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                print(f"Raw content: {content}")
+                # Try to extract JSON from content if it's wrapped in markdown
+                import re
+                json_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
+                if json_match:
+                    tasks_data = json.loads(json_match.group(1))
+                else:
+                    return []
+
+            tasks = []
+            for task_data in tasks_data:
+                title = task_data.get("title", "").strip()
+                status = task_data.get("status", "To Do").strip()
+                due_date_text = task_data.get("due_date_text")
+                
+                if not title:
+                    continue
+                    
+                # Parse due date if present
+                due_date = None
+                if due_date_text:
+                    due_date = parse_date_from_text(due_date_text, timezone_offset_minutes)
+                    print(f"Task '{title}' - due_date_text: '{due_date_text}' -> parsed: {due_date}")
+                
+                # Create task
+                task = TaskCreate(
+                    title=title,
+                    status=status,
+                    due_date=due_date
+                )
+                tasks.append(task)
+                print(f"Created task: {task}")
+
+            return tasks
+
         except Exception as e:
-            print(f"Error extracting tasks: {str(e)}")
-            print(f"Error type: {type(e).__name__}")
-            print(f"Error traceback: {traceback.format_exc()}")
+            print(f"Error in extract_tasks: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
             return [] 

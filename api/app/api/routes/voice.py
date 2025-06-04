@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from typing import List, Optional
 from ...services.voice_service import VoiceService
 from ...services.task_service import TaskService
 from ...schemas.task import TaskCreate, TaskResponse
@@ -178,6 +178,7 @@ async def extract_tasks(
 @router.post("/process", response_model=List[TaskResponse])
 async def process_voice(
     audio: UploadFile = File(...),
+    timezone_offset: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user)
 ):
     """
@@ -185,9 +186,23 @@ async def process_voice(
     1. Transcribe audio to text
     2. Extract tasks from transcription
     3. Create tasks in database
+    
+    Args:
+        audio: Audio file to process
+        timezone_offset: User's timezone offset in minutes (optional)
+        user_id: Authenticated user ID
     """
     # Read audio content
     audio_content = await audio.read()
+    
+    # Parse timezone offset
+    tz_offset_minutes = None
+    if timezone_offset:
+        try:
+            tz_offset_minutes = int(timezone_offset)
+            print(f"User timezone offset: {tz_offset_minutes} minutes")
+        except ValueError:
+            print(f"Invalid timezone offset: {timezone_offset}")
     
     # Transcribe audio
     transcription = await voice_service.transcribe_audio(audio_content)
@@ -198,8 +213,8 @@ async def process_voice(
             detail="Failed to transcribe audio"
         )
     
-    # Extract tasks from transcription
-    task_creates = await voice_service.extract_tasks(transcription)
+    # Extract tasks from transcription with timezone info
+    task_creates = await voice_service.extract_tasks(transcription, tz_offset_minutes)
     
     if not task_creates:
         raise HTTPException(

@@ -42,3 +42,5 @@ next-env.d.ts
 
 # Log files
 ngrok.log
+
+.early.coverage

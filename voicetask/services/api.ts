@@ -305,50 +305,68 @@ export const apiService = {
       const uriParts = audioUri.split('.');
       const fileExtension = uriParts[uriParts.length - 1];
       
-      // Properly handle the file URI based on platform
-      const fileUri = Platform.OS === 'ios' 
-        ? audioUri.replace('file://', '') 
-        : audioUri;
+      // Get user's timezone offset (in minutes)
+      const timezoneOffset = new Date().getTimezoneOffset();
+      console.log('🌍 API: User timezone offset (minutes):', timezoneOffset);
       
       formData.append('audio', {
-        uri: fileUri,
+        uri: audioUri,
+        type: `audio/${fileExtension}`,
         name: `recording.${fileExtension}`,
-        type: `audio/${fileExtension === 'mp3' ? 'mpeg' : fileExtension}`,
       } as any);
-
-      // Set up headers
-      const headers: Record<string, string> = {
+      
+      // Add timezone offset to the request
+      formData.append('timezone_offset', timezoneOffset.toString());
+      
+      let headers: Record<string, string> = {
         'Content-Type': 'multipart/form-data',
       };
       
-      // Choose endpoint based on authentication
-      let endpoint;
-      
       if (useAuth) {
         const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
+        if (!token) {
+          throw new Error('No authentication token found');
         }
-        endpoint = `${API_BASE_URL}/voice/process`;
-        console.log('🎙️ API: Using authenticated endpoint:', endpoint);
-      } else {
-        endpoint = `${API_BASE_URL}/voice/process-test`;
-        console.log('🎙️ API: Using test endpoint:', endpoint);
+        headers['Authorization'] = `Bearer ${token}`;
       }
-
-      const response = await axios.post(endpoint, formData, { headers });
-      console.log('🎙️ API: Process voice response:', response.data);
       
-      return response.data;
-    } catch (error) {
-      console.error('❌ API: Error processing voice:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('❌ API: Axios error details:', {
-          response: error.response?.data,
-          status: error.response?.status,
-        });
+      // Make API request
+      const response = await api.post('/voice/process', formData, {
+        headers,
+        timeout: 30000, // 30 second timeout
+      });
+      
+      console.log('🎙️ API: Raw voice processing response:', JSON.stringify(response.data, null, 2));
+      
+      // Map backend field names to frontend field names for newly created tasks
+      const mappedTasks = response.data.map((task: any) => {
+        const mapped = {
+          ...task,
+          dueDate: task.due_date, // Map due_date to dueDate
+          completed: task.status === 'Done' // Set completed based on status
+        };
+        console.log(`🎙️ API: New task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
+        return mapped;
+      });
+      
+      console.log('🎙️ API: Final mapped new tasks:', JSON.stringify(mappedTasks, null, 2));
+      
+      return mappedTasks;
+    } catch (error: any) {
+      console.error('🎙️ API: Error processing voice:', error);
+      
+      // Handle different error types with more specific messages
+      if (error.message?.includes('Network Error')) {
+        throw new Error('Network connection failed. Please check your internet connection.');
+      } else if (error.response?.status === 401) {
+        throw new Error('Authentication failed. Please log in again.');
+      } else if (error.response?.status === 413) {
+        throw new Error('Audio file is too large. Please record a shorter message.');
+      } else if (error.response?.status >= 500) {
+        throw new Error('Server error. Please try again later.');
+      } else {
+        throw new Error(error.message || 'Failed to process voice recording');
       }
-      throw new Error('Failed to process voice recording');
     }
   },
 
@@ -373,8 +391,22 @@ export const apiService = {
         } as Record<string, string>
       });
       
-      console.log('🔄 API: Fetched tasks:', response.data);
-      return response.data;
+      console.log('🔄 API: Raw backend response:', JSON.stringify(response.data, null, 2));
+      
+      // Map backend field names to frontend field names
+      const mappedTasks = response.data.map((task: any) => {
+        const mapped = {
+          ...task,
+          dueDate: task.due_date, // Map due_date to dueDate
+          completed: task.status === 'Done' // Set completed based on status
+        };
+        console.log(`🔄 API: Task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
+        return mapped;
+      });
+      
+      console.log('🔄 API: Final mapped tasks:', JSON.stringify(mappedTasks, null, 2));
+      
+      return mappedTasks;
     } catch (error) {
       console.error('❌ API: Error fetching tasks:', error);
       if (axios.isAxiosError(error)) {

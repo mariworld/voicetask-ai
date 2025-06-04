@@ -28,7 +28,9 @@ const TodoScreen = () => {
   // Get tasks and actions from the task store
   const allTasks = useTaskStore(state => state.tasks);
   const todoTasks = useMemo(() => {
-    return allTasks.filter(task => task.status === 'To Do');
+    const filtered = allTasks.filter(task => task.status === 'To Do');
+    console.log('🎯 TodoScreen: Filtered todo tasks with due dates:', filtered.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate })));
+    return filtered;
   }, [allTasks]);
   
   // Get store actions once to avoid re-renders
@@ -993,7 +995,42 @@ const TodoScreen = () => {
                           >
                             <Text style={styles.dueDateText}>
                               {item.dueDate 
-                                ? new Date(item.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+                                ? (() => {
+                                    // Debug the due date processing
+                                    const rawDate = item.dueDate;
+                                    const parsedDate = new Date(rawDate);
+                                    const now = new Date();
+                                    
+                                    console.log(`🗓️ Task ${item.id} due date debug:`, {
+                                      raw: rawDate,
+                                      parsed: parsedDate.toISOString(),
+                                      local: parsedDate.toLocaleString(),
+                                      isValid: !isNaN(parsedDate.getTime()),
+                                      nowUTC: now.toISOString(),
+                                      timezoneOffset: parsedDate.getTimezoneOffset(),
+                                    });
+                                    
+                                    // Check if date is valid
+                                    if (isNaN(parsedDate.getTime())) {
+                                      console.error(`❌ Invalid date for task ${item.id}: ${rawDate}`);
+                                      return "Invalid Date";
+                                    }
+                                    
+                                    // Format the date with proper timezone handling
+                                    try {
+                                      return parsedDate.toLocaleDateString([], { 
+                                        month: 'short', 
+                                        day: 'numeric', 
+                                        hour: 'numeric', 
+                                        minute: '2-digit', 
+                                        hour12: true,
+                                        timeZoneName: 'short' // Show timezone for debugging
+                                      });
+                                    } catch (formatError) {
+                                      console.error(`❌ Date formatting error for task ${item.id}:`, formatError);
+                                      return parsedDate.toLocaleString(); // Fallback
+                                    }
+                                  })()
                                 : "Add Due Date"}
                             </Text>
                           </TouchableOpacity>

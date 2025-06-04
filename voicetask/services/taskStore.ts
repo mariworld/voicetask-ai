@@ -41,6 +41,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const fetchedTasks = await apiService.getTasks();
+      console.log('📦 TaskStore: Storing tasks with due dates:', fetchedTasks.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate })));
       set({ tasks: fetchedTasks || [], isLoading: false });
     } catch (e: any) {
       set({ error: e.message || 'Failed to fetch tasks', isLoading: false });

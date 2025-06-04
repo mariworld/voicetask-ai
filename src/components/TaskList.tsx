@@ -4,6 +4,10 @@ interface Task {
   id: string;
   title: string;
   status: 'To Do' | 'In Progress' | 'Done';
+  due_date?: string;
+  created_at?: string;
+  updated_at?: string;
+  user_id?: string;
 }
 
 interface TaskListProps {
@@ -36,6 +40,7 @@ const TaskList = ({
               id={task.id}
               title={task.title}
               status={task.status}
+              due_date={task.due_date}
               onAddToCalendar={onAddToCalendar}
               onMarkDone={onMarkDone}
             />
