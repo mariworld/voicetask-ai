@@ -2,6 +2,11 @@
 
 A comprehensive suite for voice-controlled task management, including a React Native Expo mobile app, a Next.js web interface (if applicable), and a Python FastAPI backend.
 
+## Video Demo
+https://github.com/user-attachments/assets/e98649bc-fa05-4288-9189-a4bde7a55249
+
+
+
 ## Table of Contents
 
 - [Project Overview](#project-overview)
