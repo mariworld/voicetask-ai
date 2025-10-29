@@ -339,27 +339,69 @@ export const apiService = {
         }
 
         // Make API request
-        const response = await api.post('/voice/process', formData, {
-          headers,
-          timeout: 30000, // 30 second timeout
-        });
+        try {
+          const response = await api.post('/voice/process', formData, {
+            headers,
+            timeout: 30000, // 30 second timeout
+          });
 
-        console.log('🎙️ API: Raw voice processing response:', JSON.stringify(response.data, null, 2));
+          console.log('🎙️ API: Raw voice processing response:', JSON.stringify(response.data, null, 2));
 
-        // Map backend field names to frontend field names for newly created tasks
-        const mappedTasks = response.data.map((task: any) => {
-          const mapped = {
-            ...task,
-            dueDate: task.due_date, // Map due_date to dueDate
-            completed: task.status === 'Done' // Set completed based on status
-          };
-          console.log(`🎙️ API: New task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
-          return mapped;
-        });
+          // Check if response is empty array or no tasks
+          if (!response.data || (Array.isArray(response.data) && response.data.length === 0)) {
+            console.log('🎙️ API: No tasks detected in response');
+            throw new Error('No tasks detected from your recording');
+          }
 
-        console.log('🎙️ API: Final mapped new tasks:', JSON.stringify(mappedTasks, null, 2));
+          // Map backend field names to frontend field names for newly created tasks
+          const mappedTasks = response.data.map((task: any) => {
+            const mapped = {
+              ...task,
+              dueDate: task.due_date, // Map due_date to dueDate
+              completed: task.status === 'Done' // Set completed based on status
+            };
+            console.log(`🎙️ API: New task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
+            return mapped;
+          });
 
-        return mappedTasks;
+          console.log('🎙️ API: Final mapped new tasks:', JSON.stringify(mappedTasks, null, 2));
+
+          return mappedTasks;
+        } catch (requestError: any) {
+          console.log('🎙️ API: Request error caught:', requestError);
+          console.log('🎙️ API: Error response status:', requestError.response?.status);
+          console.log('🎙️ API: Error response data:', JSON.stringify(requestError.response?.data));
+
+          // Check if it's a 400 error with empty response (no tasks detected)
+          if (requestError.response?.status === 400) {
+            const responseData = requestError.response?.data;
+            console.log('🎙️ API: 400 error - checking response data type and content');
+
+            // Check if response is empty array or contains no tasks message
+            if (Array.isArray(responseData) && responseData.length === 0) {
+              console.log('🎙️ API: Empty array detected, throwing "no tasks" error');
+              throw new Error('No tasks detected from your recording');
+            }
+
+            // Check for specific error messages from backend
+            if (responseData?.detail) {
+              const detailLower = responseData.detail.toLowerCase();
+              console.log('🎙️ API: Checking error detail:', detailLower);
+
+              if (detailLower.includes('no tasks') ||
+                  detailLower.includes('could not') ||
+                  detailLower.includes('extract') ||
+                  detailLower.includes('failed to extract')) {
+                console.log('🎙️ API: Error detail indicates no tasks, throwing custom error');
+                throw new Error('No tasks detected from your recording');
+              }
+            }
+          }
+
+          // Re-throw other errors
+          console.log('🎙️ API: Re-throwing error as-is');
+          throw requestError;
+        }
       }, 2); // Retry up to 2 times (3 total attempts)
     } catch (error: any) {
       console.error('🎙️ API: Error processing voice:', error);

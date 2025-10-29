@@ -37,6 +37,29 @@ export function parseError(error: unknown): ErrorDetails {
 
     // Handle specific HTTP status codes
     switch (status) {
+      case 400:
+        // Check if it's an empty array response (no tasks detected)
+        if (Array.isArray(errorData) && errorData.length === 0) {
+          return {
+            title: 'No Tasks Detected',
+            message: 'I couldn\'t find any tasks in your recording. Try speaking more clearly about what you need to do.',
+            isRetryable: false,
+          };
+        }
+        // Check for "no tasks" in error message
+        if (errorData?.detail?.toLowerCase().includes('no tasks') ||
+            errorData?.detail?.toLowerCase().includes('extract')) {
+          return {
+            title: 'No Tasks Found',
+            message: 'I couldn\'t detect any tasks from your recording. Try including specific actions and times.',
+            isRetryable: false,
+          };
+        }
+        return {
+          title: 'Invalid Request',
+          message: errorData?.detail || 'The request could not be processed. Please try again.',
+          isRetryable: false,
+        };
       case 401:
         return {
           title: 'Authentication Error',
@@ -172,6 +195,15 @@ export async function retryWithBackoff<T>(
       return await fn();
     } catch (error) {
       lastError = error;
+
+      // Check the error message directly for "no tasks" cases
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.toLowerCase().includes('no tasks') ||
+          errorMessage.toLowerCase().includes('extract')) {
+        // Don't retry for "no tasks" errors
+        throw error;
+      }
+
       const errorDetails = parseError(error);
 
       // Don't retry if error is not retryable

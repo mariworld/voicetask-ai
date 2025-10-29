@@ -14,7 +14,7 @@ import { useTaskStore, Task as TaskType } from '@/services/taskStore';
 import { useRouter } from 'expo-router';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Waveform } from '@/components/Waveform';
-import { showErrorAlert } from '@/utils/errorHandler';
+import { showErrorAlert, parseError } from '@/utils/errorHandler';
 import { LoadingOverlay } from '@/components/LoadingOverlay';
 // import { AddTaskModal } from '@/components/AddTaskModal'; // Comment out unused import
 
@@ -674,22 +674,62 @@ const TodoScreen = () => {
         // createdTasksFromDB.forEach((task: TaskType) => {
         //   addTask(task);
         // });
-        Alert.alert('Success', `Added ${createdTasksFromDB.length} new task(s) from your voice recording. Refreshing list...`);
+        Alert.alert(
+          'Success! 🎉',
+          `Added ${createdTasksFromDB.length} new task${createdTasksFromDB.length > 1 ? 's' : ''} from your voice recording.`,
+          [{ text: 'OK' }]
+        );
         await fetchTasks(); // Re-fetch tasks from server
       } else {
-        Alert.alert('No tasks created', 'No tasks were detected or created from your voice recording.');
+        // No tasks detected - show helpful guidance
+        Alert.alert(
+          'No Tasks Detected',
+          'I couldn\'t find any tasks in your recording.\n\nTry saying things like:\n• "Buy groceries tomorrow"\n• "Call mom at 3pm"\n• "Finish report by Friday"',
+          [
+            { text: 'Record Again', onPress: () => startRecording() },
+            { text: 'OK', style: 'cancel' }
+          ]
+        );
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       addDebugLog(`❌ Error in processVoiceAndCreateTasks: ${errorMessage}`);
       console.error('❌ Error in processVoiceAndCreateTasks:', error);
 
-      // Use the better error handling with retry option
-      showErrorAlert(
-        error,
-        () => processVoiceAndCreateTasks(audioFileUri), // Retry function
-        () => setIsProcessingTasks(false) // Cancel function
-      );
+      // Better error logging for debugging
+      if (error && typeof error === 'object') {
+        console.error('❌ Error details:', {
+          message: (error as any).message,
+          status: (error as any).response?.status,
+          data: (error as any).response?.data,
+          config: (error as any).config?.url,
+        });
+      }
+
+      // Parse the error to get user-friendly details
+      const errorDetails = parseError(error);
+      addDebugLog(`📋 Parsed error: ${errorDetails.title} - ${errorDetails.message}`);
+
+      // Check if it's a "no tasks" type error vs actual error
+      if (errorMessage.toLowerCase().includes('no tasks') ||
+          errorMessage.toLowerCase().includes('extract') ||
+          errorDetails.title.includes('No Tasks')) {
+        Alert.alert(
+          'No Tasks Found',
+          'I couldn\'t detect any tasks from your recording.\n\nTips:\n• Speak clearly about what you need to do\n• Include time details like "tomorrow" or "at 3pm"\n• Try: "Remind me to call John tomorrow"',
+          [
+            { text: 'Try Again', onPress: () => startRecording() },
+            { text: 'Cancel', style: 'cancel' }
+          ]
+        );
+      } else {
+        // Use the better error handling with retry option for actual errors
+        showErrorAlert(
+          error,
+          () => processVoiceAndCreateTasks(audioFileUri), // Retry function
+          () => setIsProcessingTasks(false) // Cancel function
+        );
+      }
     } finally {
       setIsProcessingTasks(false); // Indicate processing is finished
     }
