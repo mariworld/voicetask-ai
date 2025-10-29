@@ -1,11 +1,11 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Base URL for API - change this to your actual backend URL
 // For development, use your local network IP that can be accessed from your device
-const API_BASE_URL = 'http://192.168.1.214:8001/api/v1'; // Updated port to 8001
+const API_BASE_URL = 'http://192.168.1.140:8001/api/v1'; // Updated port to 8001
 
 // Token storage key
 const AUTH_TOKEN_KEY = 'auth_token';
@@ -120,23 +120,27 @@ export const apiService = {
   async transcribeAudio(audioUri: string, useAuth = true): Promise<string> {
     try {
       console.log('🎙️ API: Transcribing audio from URI:', audioUri);
-      
-      // Get file info
-      const fileInfo = await FileSystem.getInfoAsync(audioUri, { size: true, md5: true });
+
+      // Get file info using new File API
+      const file = new File(audioUri);
+      const exists = file.exists;
+      const size = file.size;
+
+      const fileInfo = { exists, size };
       console.log('🎙️ API: File info:', JSON.stringify(fileInfo, null, 2));
-      
-      if (!fileInfo.exists) {
+
+      if (!exists) {
         console.error('❌ API: Audio file does not exist at path:', audioUri);
         throw new Error('Audio file does not exist');
       }
-      
-      if (fileInfo.size === 0) {
+
+      if (size === 0) {
         console.error('❌ API: Audio file is empty (0 bytes)');
         throw new Error('Audio file is empty (0 bytes)');
       }
-      
+
       // Log additional details about the file
-      console.log(`🎙️ API: Audio file size: ${fileInfo.size} bytes`);
+      console.log(`🎙️ API: Audio file size: ${size} bytes`);
       
       // Create form data with audio file
       const formData = new FormData();
@@ -290,11 +294,12 @@ export const apiService = {
   async processVoice(audioUri: string, useAuth = true) {
     try {
       console.log('🎙️ API: Processing voice from URI:', audioUri);
-      
-      // Get file info
-      const fileInfo = await FileSystem.getInfoAsync(audioUri);
-      
-      if (!fileInfo.exists) {
+
+      // Get file info using new File API
+      const file = new File(audioUri);
+      const exists = file.exists;
+
+      if (!exists) {
         throw new Error('Audio file does not exist');
       }
       
