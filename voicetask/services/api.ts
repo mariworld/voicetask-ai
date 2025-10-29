@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import { File } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { parseError, retryWithBackoff } from '@/utils/errorHandler';
 
 // Base URL for API - change this to your actual backend URL
 // For development, use your local network IP that can be accessed from your device
@@ -302,76 +303,70 @@ export const apiService = {
       if (!exists) {
         throw new Error('Audio file does not exist');
       }
-      
-      // Create form data with audio file
-      const formData = new FormData();
-      
-      // Append file with proper URI and type
-      const uriParts = audioUri.split('.');
-      const fileExtension = uriParts[uriParts.length - 1];
-      
-      // Get user's timezone offset (in minutes)
-      const timezoneOffset = new Date().getTimezoneOffset();
-      console.log('🌍 API: User timezone offset (minutes):', timezoneOffset);
-      
-      formData.append('audio', {
-        uri: audioUri,
-        type: `audio/${fileExtension}`,
-        name: `recording.${fileExtension}`,
-      } as any);
-      
-      // Add timezone offset to the request
-      formData.append('timezone_offset', timezoneOffset.toString());
-      
-      let headers: Record<string, string> = {
-        'Content-Type': 'multipart/form-data',
-      };
-      
-      if (useAuth) {
-        const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
-      // Make API request
-      const response = await api.post('/voice/process', formData, {
-        headers,
-        timeout: 30000, // 30 second timeout
-      });
-      
-      console.log('🎙️ API: Raw voice processing response:', JSON.stringify(response.data, null, 2));
-      
-      // Map backend field names to frontend field names for newly created tasks
-      const mappedTasks = response.data.map((task: any) => {
-        const mapped = {
-          ...task,
-          dueDate: task.due_date, // Map due_date to dueDate
-          completed: task.status === 'Done' // Set completed based on status
+
+      // Wrap the API call with retry logic
+      return await retryWithBackoff(async () => {
+        // Create form data with audio file
+        const formData = new FormData();
+
+        // Append file with proper URI and type
+        const uriParts = audioUri.split('.');
+        const fileExtension = uriParts[uriParts.length - 1];
+
+        // Get user's timezone offset (in minutes)
+        const timezoneOffset = new Date().getTimezoneOffset();
+        console.log('🌍 API: User timezone offset (minutes):', timezoneOffset);
+
+        formData.append('audio', {
+          uri: audioUri,
+          type: `audio/${fileExtension}`,
+          name: `recording.${fileExtension}`,
+        } as any);
+
+        // Add timezone offset to the request
+        formData.append('timezone_offset', timezoneOffset.toString());
+
+        let headers: Record<string, string> = {
+          'Content-Type': 'multipart/form-data',
         };
-        console.log(`🎙️ API: New task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
-        return mapped;
-      });
-      
-      console.log('🎙️ API: Final mapped new tasks:', JSON.stringify(mappedTasks, null, 2));
-      
-      return mappedTasks;
+
+        if (useAuth) {
+          const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+          if (!token) {
+            throw new Error('No authentication token found');
+          }
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        // Make API request
+        const response = await api.post('/voice/process', formData, {
+          headers,
+          timeout: 30000, // 30 second timeout
+        });
+
+        console.log('🎙️ API: Raw voice processing response:', JSON.stringify(response.data, null, 2));
+
+        // Map backend field names to frontend field names for newly created tasks
+        const mappedTasks = response.data.map((task: any) => {
+          const mapped = {
+            ...task,
+            dueDate: task.due_date, // Map due_date to dueDate
+            completed: task.status === 'Done' // Set completed based on status
+          };
+          console.log(`🎙️ API: New task ${task.id} - due_date: ${task.due_date} -> dueDate: ${mapped.dueDate}`);
+          return mapped;
+        });
+
+        console.log('🎙️ API: Final mapped new tasks:', JSON.stringify(mappedTasks, null, 2));
+
+        return mappedTasks;
+      }, 2); // Retry up to 2 times (3 total attempts)
     } catch (error: any) {
       console.error('🎙️ API: Error processing voice:', error);
-      
-      // Handle different error types with more specific messages
-      if (error.message?.includes('Network Error')) {
-        throw new Error('Network connection failed. Please check your internet connection.');
-      } else if (error.response?.status === 401) {
-        throw new Error('Authentication failed. Please log in again.');
-      } else if (error.response?.status === 413) {
-        throw new Error('Audio file is too large. Please record a shorter message.');
-      } else if (error.response?.status >= 500) {
-        throw new Error('Server error. Please try again later.');
-      } else {
-        throw new Error(error.message || 'Failed to process voice recording');
-      }
+
+      // Use the error parser to get a better error message
+      const errorDetails = parseError(error);
+      throw new Error(errorDetails.message);
     }
   },
 

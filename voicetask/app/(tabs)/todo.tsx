@@ -13,6 +13,9 @@ import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useTaskStore, Task as TaskType } from '@/services/taskStore';
 import { useRouter } from 'expo-router';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import { Waveform } from '@/components/Waveform';
+import { showErrorAlert } from '@/utils/errorHandler';
+import { LoadingOverlay } from '@/components/LoadingOverlay';
 // import { AddTaskModal } from '@/components/AddTaskModal'; // Comment out unused import
 
 // Create a named React component
@@ -32,6 +35,49 @@ const TodoScreen = () => {
     console.log('🎯 TodoScreen: Filtered todo tasks with due dates:', filtered.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate })));
     return filtered;
   }, [allTasks]);
+
+  // Group tasks by due date
+  const groupedTasks = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const endOfWeek = new Date(today);
+    endOfWeek.setDate(endOfWeek.getDate() + 7);
+
+    const groups: { [key: string]: TaskType[] } = {
+      overdue: [],
+      today: [],
+      tomorrow: [],
+      thisWeek: [],
+      later: [],
+      noDueDate: [],
+    };
+
+    todoTasks.forEach(task => {
+      if (!task.dueDate) {
+        groups.noDueDate.push(task);
+        return;
+      }
+
+      const dueDate = new Date(task.dueDate);
+      const dueDay = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+
+      if (dueDay < today) {
+        groups.overdue.push(task);
+      } else if (dueDay.getTime() === today.getTime()) {
+        groups.today.push(task);
+      } else if (dueDay.getTime() === tomorrow.getTime()) {
+        groups.tomorrow.push(task);
+      } else if (dueDay < endOfWeek) {
+        groups.thisWeek.push(task);
+      } else {
+        groups.later.push(task);
+      }
+    });
+
+    return groups;
+  }, [todoTasks]);
   
   // Get store actions once to avoid re-renders
   const { deleteTask, updateTaskStatus, toggleTaskCompletion, addTask, reorderTasks } = useTaskStore.getState();
@@ -618,9 +664,9 @@ const TodoScreen = () => {
     try {
       setIsProcessingTasks(true); // Indicate processing starts
       addDebugLog('📞 Calling apiService.processVoice with URI: ' + audioFileUri);
-      
+
       const createdTasksFromDB: TaskType[] = await apiService.processVoice(audioFileUri);
-      
+
       addDebugLog(`✅ Received ${createdTasksFromDB.length} tasks from apiService.processVoice.`);
 
       if (createdTasksFromDB && createdTasksFromDB.length > 0) {
@@ -637,7 +683,13 @@ const TodoScreen = () => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       addDebugLog(`❌ Error in processVoiceAndCreateTasks: ${errorMessage}`);
       console.error('❌ Error in processVoiceAndCreateTasks:', error);
-      Alert.alert('Error', 'Failed to process voice and create tasks: ' + errorMessage);
+
+      // Use the better error handling with retry option
+      showErrorAlert(
+        error,
+        () => processVoiceAndCreateTasks(audioFileUri), // Retry function
+        () => setIsProcessingTasks(false) // Cancel function
+      );
     } finally {
       setIsProcessingTasks(false); // Indicate processing is finished
     }
@@ -779,17 +831,56 @@ const TodoScreen = () => {
     reorderTasks(data);
     // Provide haptic feedback
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
+
     // Log the reordering
     addDebugLog(`🔄 Tasks reordered: ${data.map(task => task.id).join(', ')}`);
   }, []);
+
+  // Render section header
+  const renderSectionHeader = (title: string, count: number, icon: string, color: string) => {
+    if (count === 0) return null;
+    return (
+      <View style={styles.sectionHeader}>
+        <Ionicons name={icon as any} size={18} color={color} />
+        <Text style={[styles.sectionHeaderText, { color }]}>
+          {title} ({count})
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <ThemedText type="title">Hey Mari, today is {dateString}</ThemedText>
+          <Text style={styles.greeting}>Hey Mari 👋</Text>
+          <Text style={styles.dateText}>Today is {dateString}</Text>
+
+          {/* Progress Indicator */}
+          {todoTasks.length > 0 && (
+            <View style={styles.progressContainer}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressText}>
+                  {todoTasks.filter(t => t.completed).length} of {todoTasks.length} completed
+                </Text>
+                <Text style={styles.progressPercentage}>
+                  {Math.round((todoTasks.filter(t => t.completed).length / todoTasks.length) * 100)}%
+                </Text>
+              </View>
+              <View style={styles.progressBarContainer}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${(todoTasks.filter(t => t.completed).length / todoTasks.length) * 100}%`,
+                      backgroundColor: todoTasks.filter(t => t.completed).length === todoTasks.length ? '#34A853' : '#4285F4'
+                    }
+                  ]}
+                />
+              </View>
+            </View>
+          )}
         </View>
 
      
@@ -801,86 +892,136 @@ const TodoScreen = () => {
           ]} 
         />
 
-        {/* Voice Recording Button */}
-        <View style={styles.recordingContainer}>
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <TouchableOpacity
-              activeOpacity={0.5}
-              style={[
-                styles.recordButton,
-                hasMicPermission === false ? styles.recordButtonDisabled : null,
-                isButtonPressed ? styles.recordButtonPressed : null,
-                recordButtonStyle // Use non-animated style instead of buttonBackgroundColor
-              ]}
-              onPress={handleMicButtonPress}
-              onPressIn={() => {
-                console.log('🎤 Button press detected (onPressIn)');
-                setIsButtonPressed(true);
-                // Add immediate haptic feedback on press
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-              onPressOut={() => {
-                console.log('🎤 Button press released (onPressOut)');
-                setIsButtonPressed(false);
-              }}
-              disabled={hasMicPermission === false || isTranscribing}
-            >
-              {isTranscribing || isProcessingTasks ? (
-                <ActivityIndicator size="large" color="white" />
-              ) : (
-                <View style={styles.buttonContent}>
-                  <Ionicons
-                    name={isRecording ? "mic-off" : "mic"}
-                    size={40}
-                    color="white"
-                    style={styles.micIcon}
-                  />
-                  <Text style={styles.buttonIconText}>
-                    {isRecording ? "STOP" : "REC"}
-                  </Text>
-                  {isRecording && (
-                    <Animated.View 
-                      style={[
-                        styles.recordingIndicator,
-                        { opacity: recordingIndicatorAnim }
-                      ]} 
+        {/* Voice Recording Button - Floating when tasks exist */}
+        {todoTasks.length === 0 ? (
+          // Center button when no tasks
+          <View style={styles.recordingContainer}>
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <TouchableOpacity
+                activeOpacity={0.5}
+                style={[
+                  styles.recordButton,
+                  hasMicPermission === false ? styles.recordButtonDisabled : null,
+                  isButtonPressed ? styles.recordButtonPressed : null,
+                  recordButtonStyle
+                ]}
+                onPress={handleMicButtonPress}
+                onPressIn={() => {
+                  console.log('🎤 Button press detected (onPressIn)');
+                  setIsButtonPressed(true);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                onPressOut={() => {
+                  console.log('🎤 Button press released (onPressOut)');
+                  setIsButtonPressed(false);
+                }}
+                disabled={hasMicPermission === false || isTranscribing}
+              >
+                {isTranscribing || isProcessingTasks ? (
+                  <ActivityIndicator size="large" color="white" />
+                ) : (
+                  <View style={styles.buttonContent}>
+                    <Ionicons
+                      name={isRecording ? "mic-off" : "mic"}
+                      size={40}
+                      color="white"
+                      style={styles.micIcon}
                     />
-                  )}
-                </View>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-          
-          {/* Permission message when denied */}
-          {hasMicPermission === false && (
-            <Text style={styles.errorText}>
-              Microphone access denied. Please enable in settings.
-            </Text>
-          )}
-          
-          {/* Recording status text */}
-          {isRecording && (
-            <View style={styles.recordingStatusContainer}>
-              <Text style={styles.recordingText}>● RECORDING</Text>
-              <Text style={styles.durationText}>{formatDuration(recordingDuration)}</Text>
-            </View>
-          )}
-          
-          {/* Ready to record indicator when not recording */}
-          {!isRecording && !isTranscribing && !isProcessingTasks && (
-            <View style={styles.recordingStatusContainer}>
-              <Text style={styles.readyText}>Tap microphone to record</Text>
-            </View>
-          )}
-          
-          {/* Status indicator */}
-          {isTranscribing && (
-            <Text style={styles.statusText}>Transcribing your voice...</Text>
-          )}
-          {isProcessingTasks && (
-            <Text style={styles.statusText}>Extracting tasks...</Text>
-          )}
-        </View>
+                    <Text style={styles.buttonIconText}>
+                      {isRecording ? "STOP" : "REC"}
+                    </Text>
+                    {isRecording && (
+                      <Animated.View
+                        style={[
+                          styles.recordingIndicator,
+                          { opacity: recordingIndicatorAnim }
+                        ]}
+                      />
+                    )}
+                  </View>
+                )}
+              </TouchableOpacity>
+            </Animated.View>
+
+            {hasMicPermission === false && (
+              <Text style={styles.errorText}>
+                Microphone access denied. Please enable in settings.
+              </Text>
+            )}
+
+            {isRecording && (
+              <View style={styles.recordingStatusContainer}>
+                <Text style={styles.recordingText}>● RECORDING</Text>
+                <Text style={styles.durationText}>{formatDuration(recordingDuration)}</Text>
+                <Waveform isRecording={isRecording} barCount={7} color="#E74C3C" />
+              </View>
+            )}
+
+            {!isRecording && !isTranscribing && !isProcessingTasks && (
+              <View style={styles.recordingStatusContainer}>
+                <Text style={styles.readyText}>Tap microphone to record</Text>
+              </View>
+            )}
+
+            {isTranscribing && (
+              <Text style={styles.statusText}>Transcribing your voice...</Text>
+            )}
+            {isProcessingTasks && (
+              <Text style={styles.statusText}>Extracting tasks...</Text>
+            )}
+          </View>
+        ) : (
+          // Floating action button when tasks exist
+          <View style={styles.fabContainer}>
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <TouchableOpacity
+                activeOpacity={0.5}
+                style={[
+                  styles.fab,
+                  hasMicPermission === false ? styles.recordButtonDisabled : null,
+                  isButtonPressed ? styles.recordButtonPressed : null,
+                  recordButtonStyle
+                ]}
+                onPress={handleMicButtonPress}
+                onPressIn={() => {
+                  setIsButtonPressed(true);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                onPressOut={() => {
+                  setIsButtonPressed(false);
+                }}
+                disabled={hasMicPermission === false || isTranscribing}
+              >
+                {isTranscribing || isProcessingTasks ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name={isRecording ? "mic-off" : "mic"}
+                      size={28}
+                      color="white"
+                    />
+                    {isRecording && (
+                      <Animated.View
+                        style={[
+                          styles.fabRecordingIndicator,
+                          { opacity: recordingIndicatorAnim }
+                        ]}
+                      />
+                    )}
+                  </>
+                )}
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Recording status banner when FAB */}
+            {isRecording && (
+              <View style={styles.recordingBanner}>
+                <Text style={styles.recordingBannerText}>● RECORDING {formatDuration(recordingDuration)}</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Empty state for when there are no tasks */}
         {isProcessingTasks && todoTasks.length === 0 && !isTranscribing && (
@@ -893,13 +1034,21 @@ const TodoScreen = () => {
 
         {!isProcessingTasks && todoTasks.length === 0 && !isTranscribing && (
           <View style={styles.emptyStateContainer}>
-            <Ionicons name="list" size={50} color="#CCCCCC" />
-            <Text style={styles.emptyStateText}>No tasks to do</Text>
-            <Text style={styles.emptyStateSubText}>Record a task or swipe to move tasks here</Text>
+            <View style={styles.emptyStateIconContainer}>
+              <Ionicons name="checkmark-circle" size={80} color="#34A853" style={styles.emptyStateIcon} />
+              <View style={styles.emptyStateSparkle}>
+                <Ionicons name="sparkles" size={30} color="#FBBC05" />
+              </View>
+            </View>
+            <Text style={styles.emptyStateText}>All Clear!</Text>
+            <Text style={styles.emptyStateSubText}>
+              No tasks in your to-do list.{'\n'}
+              Tap the microphone to add a new task with your voice
+            </Text>
           </View>
         )}
 
-        {/* Task List - Replaced ScrollView with DraggableFlatList */}
+        {/* Task List - Grouped by due date */}
         {todoTasks.length > 0 && (
           <>
             {isProcessingTasks && !isTranscribing && (
@@ -910,17 +1059,393 @@ const TodoScreen = () => {
                 </Text>
               </View>
             )}
-            <View style={styles.dragInstructionContainer}>
-
-              {dragEnabled && (
-                <TouchableOpacity 
-                  style={styles.dragModeButton}
-                  onPress={() => setDragEnabled(false)}
+            <ScrollView
+              style={styles.tasksContainer}
+              contentContainerStyle={{ paddingBottom: 100 }}
+            >
+              {/* Overdue */}
+              {renderSectionHeader('Overdue', groupedTasks.overdue.length, 'alert-circle', '#E74C3C')}
+              {groupedTasks.overdue.map((item) => (
+                <Swipeable
+                  key={item.id}
+                  ref={(ref) => swipeableRefs.current.set(item.id, ref)}
+                  renderRightActions={() => renderRightActions(item.id)}
+                  renderLeftActions={() => renderLeftActions(item.id)}
+                  onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                  overshootLeft={false}
+                  overshootRight={false}
                 >
-                  <Text style={styles.dragModeButtonText}>Done</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                  >
+                    <View style={[
+                      styles.taskItem,
+                      {
+                        borderLeftColor:
+                          item.priority === 'high' ? '#E74C3C' :
+                          item.priority === 'medium' ? '#FBBC05' :
+                          item.priority === 'low' ? '#34A853' :
+                          '#E0E0E0'
+                      }
+                    ]}>
+                      <TouchableOpacity
+                        style={styles.taskCheckbox}
+                        onPress={() => toggleTaskCompletion(item.id)}
+                      >
+                        {item.completed ? (
+                          <Ionicons name="checkmark-circle" size={24} color="green" />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color="gray" />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                        {item.title}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.dueDateTouchable}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                      >
+                        {item.dueDate ? (
+                          (() => {
+                            const parsedDate = new Date(item.dueDate);
+                            const now = new Date();
+                            const diffMs = parsedDate.getTime() - now.getTime();
+                            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+                            let color = '#666';
+                            let iconName: any = 'calendar-outline';
+
+                            if (diffMs < 0) {
+                              color = '#E74C3C';
+                              iconName = 'alert-circle';
+                            } else if (diffHours < 24) {
+                              color = '#FF9500';
+                              iconName = 'time';
+                            } else if (diffDays < 7) {
+                              color = '#FBBC05';
+                              iconName = 'calendar';
+                            }
+
+                            let dateStr = '';
+                            if (diffMs < 0) {
+                              dateStr = 'Overdue';
+                            } else if (diffHours < 1) {
+                              const mins = Math.floor(diffMs / (1000 * 60));
+                              dateStr = `${mins}m`;
+                            } else if (diffHours < 24) {
+                              dateStr = `${diffHours}h`;
+                            } else if (diffDays < 7) {
+                              dateStr = `${diffDays}d`;
+                            } else {
+                              dateStr = parsedDate.toLocaleDateString([], {
+                                month: 'short',
+                                day: 'numeric'
+                              });
+                            }
+
+                            return (
+                              <View style={styles.dueDateBadge}>
+                                <Ionicons name={iconName} size={14} color={color} />
+                                <Text style={[styles.dueDateText, { color }]}>
+                                  {dateStr}
+                                </Text>
+                              </View>
+                            );
+                          })()
+                        ) : (
+                          <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+              ))}
+
+              {/* Today */}
+              {renderSectionHeader('Today', groupedTasks.today.length, 'today', '#FF9500')}
+              {groupedTasks.today.map((item) => (
+                <Swipeable
+                  key={item.id}
+                  ref={(ref) => swipeableRefs.current.set(item.id, ref)}
+                  renderRightActions={() => renderRightActions(item.id)}
+                  renderLeftActions={() => renderLeftActions(item.id)}
+                  onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                  overshootLeft={false}
+                  overshootRight={false}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                  >
+                    <View style={[
+                      styles.taskItem,
+                      {
+                        borderLeftColor:
+                          item.priority === 'high' ? '#E74C3C' :
+                          item.priority === 'medium' ? '#FBBC05' :
+                          item.priority === 'low' ? '#34A853' :
+                          '#E0E0E0'
+                      }
+                    ]}>
+                      <TouchableOpacity
+                        style={styles.taskCheckbox}
+                        onPress={() => toggleTaskCompletion(item.id)}
+                      >
+                        {item.completed ? (
+                          <Ionicons name="checkmark-circle" size={24} color="green" />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color="gray" />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                        {item.title}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.dueDateTouchable}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                      >
+                        {item.dueDate ? (
+                          (() => {
+                            const parsedDate = new Date(item.dueDate);
+                            const now = new Date();
+                            const diffMs = parsedDate.getTime() - now.getTime();
+                            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+                            const color = '#FF9500';
+                            const iconName = 'time';
+                            let dateStr = '';
+
+                            if (diffHours < 1) {
+                              const mins = Math.floor(diffMs / (1000 * 60));
+                              dateStr = `${mins}m`;
+                            } else {
+                              dateStr = `${diffHours}h`;
+                            }
+
+                            return (
+                              <View style={styles.dueDateBadge}>
+                                <Ionicons name={iconName} size={14} color={color} />
+                                <Text style={[styles.dueDateText, { color }]}>
+                                  {dateStr}
+                                </Text>
+                              </View>
+                            );
+                          })()
+                        ) : (
+                          <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+              ))}
+
+              {/* Tomorrow */}
+              {renderSectionHeader('Tomorrow', groupedTasks.tomorrow.length, 'calendar', '#FBBC05')}
+              {groupedTasks.tomorrow.map((item) => (
+                <Swipeable
+                  key={item.id}
+                  ref={(ref) => swipeableRefs.current.set(item.id, ref)}
+                  renderRightActions={() => renderRightActions(item.id)}
+                  renderLeftActions={() => renderLeftActions(item.id)}
+                  onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                  overshootLeft={false}
+                  overshootRight={false}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                  >
+                    <View style={[
+                      styles.taskItem,
+                      {
+                        borderLeftColor:
+                          item.priority === 'high' ? '#E74C3C' :
+                          item.priority === 'medium' ? '#FBBC05' :
+                          item.priority === 'low' ? '#34A853' :
+                          '#E0E0E0'
+                      }
+                    ]}>
+                      <TouchableOpacity
+                        style={styles.taskCheckbox}
+                        onPress={() => toggleTaskCompletion(item.id)}
+                      >
+                        {item.completed ? (
+                          <Ionicons name="checkmark-circle" size={24} color="green" />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color="gray" />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                        {item.title}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.dueDateTouchable}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                      >
+                        {item.dueDate ? (
+                          <View style={styles.dueDateBadge}>
+                            <Ionicons name="calendar" size={14} color="#FBBC05" />
+                            <Text style={[styles.dueDateText, { color: '#FBBC05' }]}>
+                              Tomorrow
+                            </Text>
+                          </View>
+                        ) : (
+                          <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+              ))}
+
+              {/* This Week */}
+              {renderSectionHeader('This Week', groupedTasks.thisWeek.length, 'calendar-outline', '#666')}
+              {groupedTasks.thisWeek.map((item) => (
+                <Swipeable
+                  key={item.id}
+                  ref={(ref) => swipeableRefs.current.set(item.id, ref)}
+                  renderRightActions={() => renderRightActions(item.id)}
+                  renderLeftActions={() => renderLeftActions(item.id)}
+                  onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                  overshootLeft={false}
+                  overshootRight={false}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                  >
+                    <View style={[
+                      styles.taskItem,
+                      {
+                        borderLeftColor:
+                          item.priority === 'high' ? '#E74C3C' :
+                          item.priority === 'medium' ? '#FBBC05' :
+                          item.priority === 'low' ? '#34A853' :
+                          '#E0E0E0'
+                      }
+                    ]}>
+                      <TouchableOpacity
+                        style={styles.taskCheckbox}
+                        onPress={() => toggleTaskCompletion(item.id)}
+                      >
+                        {item.completed ? (
+                          <Ionicons name="checkmark-circle" size={24} color="green" />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color="gray" />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                        {item.title}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.dueDateTouchable}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                      >
+                        {item.dueDate ? (
+                          (() => {
+                            const parsedDate = new Date(item.dueDate);
+                            const dateStr = parsedDate.toLocaleDateString([], {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric'
+                            });
+
+                            return (
+                              <View style={styles.dueDateBadge}>
+                                <Ionicons name="calendar" size={14} color="#666" />
+                                <Text style={[styles.dueDateText, { color: '#666' }]}>
+                                  {dateStr}
+                                </Text>
+                              </View>
+                            );
+                          })()
+                        ) : (
+                          <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+              ))}
+
+              {/* Later */}
+              {renderSectionHeader('Later', groupedTasks.later.length + groupedTasks.noDueDate.length, 'hourglass-outline', '#999')}
+              {[...groupedTasks.later, ...groupedTasks.noDueDate].map((item) => (
+                <Swipeable
+                  key={item.id}
+                  ref={(ref) => swipeableRefs.current.set(item.id, ref)}
+                  renderRightActions={() => renderRightActions(item.id)}
+                  renderLeftActions={() => renderLeftActions(item.id)}
+                  onSwipeableOpen={(direction) => handleSwipeableOpen(item.id)}
+                  overshootLeft={false}
+                  overshootRight={false}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                  >
+                    <View style={[
+                      styles.taskItem,
+                      {
+                        borderLeftColor:
+                          item.priority === 'high' ? '#E74C3C' :
+                          item.priority === 'medium' ? '#FBBC05' :
+                          item.priority === 'low' ? '#34A853' :
+                          '#E0E0E0'
+                      }
+                    ]}>
+                      <TouchableOpacity
+                        style={styles.taskCheckbox}
+                        onPress={() => toggleTaskCompletion(item.id)}
+                      >
+                        {item.completed ? (
+                          <Ionicons name="checkmark-circle" size={24} color="green" />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color="gray" />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
+                        {item.title}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.dueDateTouchable}
+                        onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
+                      >
+                        {item.dueDate ? (
+                          (() => {
+                            const parsedDate = new Date(item.dueDate);
+                            const dateStr = parsedDate.toLocaleDateString([], {
+                              month: 'short',
+                              day: 'numeric'
+                            });
+
+                            return (
+                              <View style={styles.dueDateBadge}>
+                                <Ionicons name="calendar-outline" size={14} color="#999" />
+                                <Text style={[styles.dueDateText, { color: '#999' }]}>
+                                  {dateStr}
+                                </Text>
+                              </View>
+                            );
+                          })()
+                        ) : (
+                          <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+              ))}
+            </ScrollView>
+          </>
+        )}
+
+        {/* Old draggable flatlist removed - replaced with grouped sections */}
+        {false && todoTasks.length > 0 && (
+          <>
             <DraggableFlatList
               data={todoTasks}
               keyExtractor={(item) => item.id}
@@ -933,8 +1458,15 @@ const TodoScreen = () => {
                         onLongPress={drag}
                         disabled={isActive}
                         style={[
-                          styles.taskItem, 
-                          isActive && styles.taskItemActive
+                          styles.taskItem,
+                          isActive && styles.taskItemActive,
+                          {
+                            borderLeftColor:
+                              item.priority === 'high' ? '#E74C3C' :
+                              item.priority === 'medium' ? '#FBBC05' :
+                              item.priority === 'low' ? '#34A853' :
+                              '#E0E0E0'
+                          }
                         ]}
                       >
                         <TouchableOpacity
@@ -967,7 +1499,7 @@ const TodoScreen = () => {
                       overshootLeft={false}
                       overshootRight={false}
                     >
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         activeOpacity={0.7}
                         onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
                         onLongPress={() => {
@@ -975,7 +1507,16 @@ const TodoScreen = () => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         }}
                       >
-                        <View style={styles.taskItem}>
+                        <View style={[
+                          styles.taskItem,
+                          {
+                            borderLeftColor:
+                              item.priority === 'high' ? '#E74C3C' :
+                              item.priority === 'medium' ? '#FBBC05' :
+                              item.priority === 'low' ? '#34A853' :
+                              '#E0E0E0'
+                          }
+                        ]}>
                           <TouchableOpacity
                             style={styles.taskCheckbox}
                             onPress={() => toggleTaskCompletion(item.id)}
@@ -989,50 +1530,66 @@ const TodoScreen = () => {
                           <Text style={[styles.taskTitle, item.completed && styles.completedTask]}>
                             {item.title}
                           </Text>
-                          <TouchableOpacity 
+                          <TouchableOpacity
                             style={styles.dueDateTouchable}
                             onPress={() => router.push({ pathname: '/task-detail', params: { id: item.id } })}
                           >
-                            <Text style={styles.dueDateText}>
-                              {item.dueDate 
-                                ? (() => {
-                                    // Debug the due date processing
-                                    const rawDate = item.dueDate;
-                                    const parsedDate = new Date(rawDate);
-                                    const now = new Date();
-                                    
-                                    console.log(`🗓️ Task ${item.id} due date debug:`, {
-                                      raw: rawDate,
-                                      parsed: parsedDate.toISOString(),
-                                      local: parsedDate.toLocaleString(),
-                                      isValid: !isNaN(parsedDate.getTime()),
-                                      nowUTC: now.toISOString(),
-                                      timezoneOffset: parsedDate.getTimezoneOffset(),
-                                    });
-                                    
-                                    // Check if date is valid
-                                    if (isNaN(parsedDate.getTime())) {
-                                      console.error(`❌ Invalid date for task ${item.id}: ${rawDate}`);
-                                      return "Invalid Date";
-                                    }
-                                    
-                                    // Format the date with proper timezone handling
-                                    try {
-                                      return parsedDate.toLocaleDateString([], { 
-                                        month: 'short', 
-                                        day: 'numeric', 
-                                        hour: 'numeric', 
-                                        minute: '2-digit', 
-                                        hour12: true,
-                                        timeZoneName: 'short' // Show timezone for debugging
-                                      });
-                                    } catch (formatError) {
-                                      console.error(`❌ Date formatting error for task ${item.id}:`, formatError);
-                                      return parsedDate.toLocaleString(); // Fallback
-                                    }
-                                  })()
-                                : "Add Due Date"}
-                            </Text>
+                            {item.dueDate ? (
+                              (() => {
+                                const parsedDate = new Date(item.dueDate);
+                                const now = new Date();
+                                const diffMs = parsedDate.getTime() - now.getTime();
+                                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+                                // Determine color and icon based on proximity
+                                let color = '#666';
+                                let iconName: any = 'calendar-outline';
+
+                                if (diffMs < 0) {
+                                  // Overdue
+                                  color = '#E74C3C';
+                                  iconName = 'alert-circle';
+                                } else if (diffHours < 24) {
+                                  // Due today
+                                  color = '#FF9500';
+                                  iconName = 'time';
+                                } else if (diffDays < 7) {
+                                  // Due this week
+                                  color = '#FBBC05';
+                                  iconName = 'calendar';
+                                }
+
+                                // Format date string
+                                let dateStr = '';
+                                if (diffMs < 0) {
+                                  dateStr = 'Overdue';
+                                } else if (diffHours < 1) {
+                                  const mins = Math.floor(diffMs / (1000 * 60));
+                                  dateStr = `${mins}m`;
+                                } else if (diffHours < 24) {
+                                  dateStr = `${diffHours}h`;
+                                } else if (diffDays < 7) {
+                                  dateStr = `${diffDays}d`;
+                                } else {
+                                  dateStr = parsedDate.toLocaleDateString([], {
+                                    month: 'short',
+                                    day: 'numeric'
+                                  });
+                                }
+
+                                return (
+                                  <View style={styles.dueDateBadge}>
+                                    <Ionicons name={iconName} size={14} color={color} />
+                                    <Text style={[styles.dueDateText, { color }]}>
+                                      {dateStr}
+                                    </Text>
+                                  </View>
+                                );
+                              })()
+                            ) : (
+                              <Ionicons name="calendar-outline" size={20} color="#CCCCCC" />
+                            )}
                           </TouchableOpacity>
                         </View>
                       </TouchableOpacity>
@@ -1047,6 +1604,13 @@ const TodoScreen = () => {
             />
           </>
         )}
+
+        {/* Loading Overlay with better visual feedback */}
+        <LoadingOverlay
+          visible={isProcessingTasks}
+          message="Processing your voice..."
+          subMessage="Extracting tasks and creating them for you"
+        />
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -1062,7 +1626,49 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    paddingTop: 40,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  greeting: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  progressContainer: {
+    marginTop: 16,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  progressText: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+  },
+  progressPercentage: {
+    fontSize: 13,
+    color: '#4285F4',
+    fontWeight: '700',
+  },
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    transition: 'width 0.3s ease',
   },
   recordingContainer: {
     alignItems: 'center',
@@ -1155,15 +1761,23 @@ const styles = StyleSheet.create({
   },
   tasksContainer: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 0,
   },
   taskItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EFEFEF',
-    backgroundColor: 'white', // Ensure background is set for the swipeable
+    padding: 16,
+    marginHorizontal: 16,
+    marginVertical: 6,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: '#E0E0E0', // Default, will be overridden by priority
   },
   taskCheckbox: {
     marginRight: 15,
@@ -1177,12 +1791,21 @@ const styles = StyleSheet.create({
     color: '#AAAAAA',
   },
   dueDateTouchable: {
-    marginLeft: 10, // Add some space between title and due date
-    paddingVertical: 5, // Make it easier to tap
+    marginLeft: 'auto',
+    paddingVertical: 5,
+  },
+  dueDateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
   },
   dueDateText: {
-    fontSize: 12,
-    color: '#007AFF', // Blue color to indicate interactivity
+    fontSize: 11,
+    fontWeight: '600',
   },
   flashOverlay: {
     position: 'absolute',
@@ -1328,19 +1951,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 100,
+    paddingHorizontal: 40,
+  },
+  emptyStateIconContainer: {
+    position: 'relative',
+    marginBottom: 20,
+  },
+  emptyStateIcon: {
+    opacity: 0.9,
+  },
+  emptyStateSparkle: {
+    position: 'absolute',
+    top: -5,
+    right: -10,
   },
   emptyStateText: {
-    fontSize: 18,
-    color: '#888888',
+    fontSize: 24,
+    color: '#1a1a1a',
     marginTop: 10,
     fontWeight: 'bold',
   },
   emptyStateSubText: {
-    fontSize: 14,
-    color: '#AAAAAA',
-    marginTop: 5,
+    fontSize: 15,
+    color: '#888888',
+    marginTop: 10,
     textAlign: 'center',
-    paddingHorizontal: 40,
+    lineHeight: 22,
   },
   // Drag and drop styles
   taskItemActive: {
@@ -1393,4 +2029,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#333333',
   },
-}); 
+  // Floating Action Button styles
+  fabContainer: {
+    position: 'absolute',
+    bottom: 100, // Moved higher to avoid tab bar
+    right: 20,
+    zIndex: 1000,
+  },
+  fab: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fabRecordingIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF0000',
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  recordingBanner: {
+    position: 'absolute',
+    bottom: 75, // Relative to FAB, so this is fine
+    right: 0,
+    backgroundColor: '#E74C3C',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  recordingBannerText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // Section header styles
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#F8F8F8',
+    marginTop: 8,
+    gap: 8,
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+});

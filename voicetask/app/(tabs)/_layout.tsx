@@ -1,6 +1,6 @@
 import { Tabs, router } from 'expo-router';
 import React, { useEffect } from 'react';
-import { Platform, TouchableOpacity, Alert, ActivityIndicator, View } from 'react-native';
+import { Platform, TouchableOpacity, Alert, ActivityIndicator, View, Text, StyleSheet } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import TabBarBackground from '@/components/ui/TabBarBackground';
@@ -17,6 +17,12 @@ const TabLayout = () => {
   const fetchTasks = useTaskStore((state) => state.fetchTasks);
   const isLoading = useTaskStore((state) => state.isLoading);
   const error = useTaskStore((state) => state.error);
+  const tasks = useTaskStore((state) => state.tasks);
+
+  // Calculate task counts
+  const todoCount = tasks.filter(t => t.status === 'To Do').length;
+  const inProgressCount = tasks.filter(t => t.status === 'In Progress').length;
+  const doneCount = tasks.filter(t => t.status === 'Done').length;
 
   useEffect(() => {
     fetchTasks();
@@ -79,21 +85,48 @@ const TabLayout = () => {
         name="todo"
         options={{
           title: 'To Do',
-          tabBarIcon: ({ color }) => <Ionicons name="list" size={24} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={styles.tabIconContainer}>
+              <Ionicons name="list" size={24} color={color} />
+              {todoCount > 0 && (
+                <View style={[styles.badge, { backgroundColor: focused ? currentColors.tint : '#E74C3C' }]}>
+                  <Text style={styles.badgeText}>{todoCount > 99 ? '99+' : todoCount}</Text>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="in-progress"
         options={{
           title: 'In Progress',
-          tabBarIcon: ({ color }) => <Ionicons name="hourglass-outline" size={24} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={styles.tabIconContainer}>
+              <Ionicons name="hourglass-outline" size={24} color={color} />
+              {inProgressCount > 0 && (
+                <View style={[styles.badge, { backgroundColor: focused ? currentColors.tint : '#FBBC05' }]}>
+                  <Text style={styles.badgeText}>{inProgressCount > 99 ? '99+' : inProgressCount}</Text>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="done"
         options={{
           title: 'Done',
-          tabBarIcon: ({ color }) => <Ionicons name="checkmark-done-circle-outline" size={24} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={styles.tabIconContainer}>
+              <Ionicons name="checkmark-done-circle-outline" size={24} color={color} />
+              {doneCount > 0 && (
+                <View style={[styles.badge, { backgroundColor: focused ? currentColors.tint : '#34A853' }]}>
+                  <Text style={styles.badgeText}>{doneCount > 99 ? '99+' : doneCount}</Text>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
     </Tabs>
@@ -102,3 +135,27 @@ const TabLayout = () => {
 
 // Explicitly export the component as default
 export default TabLayout;
+
+const styles = StyleSheet.create({
+  tabIconContainer: {
+    position: 'relative',
+    width: 24,
+    height: 24,
+  },
+  badge: {
+    position: 'absolute',
+    top: -8,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+});
